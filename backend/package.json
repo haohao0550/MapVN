@@ -1,0 +1,48 @@
+{
+  "name": "dthub-backend",
+  "version": "1.0.0",
+  "description": "DTHub Platform Backend API Server",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "db:generate": "npx prisma generate",
+    "db:migrate": "npx prisma migrate deploy",
+    "db:seed": "node prisma/seed.js",
+    "db:reset": "npx prisma migrate reset",
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
+  "keywords": [
+    "dthub",
+    "digital-twin",
+    "api",
+    "express",
+    "prisma"
+  ],
+  "author": "DTHub Team",
+  "license": "MIT",
+  "dependencies": {
+    "@prisma/client": "^6.10.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "express-rate-limit": "^7.4.0",
+    "express-validator": "^7.2.0",
+    "helmet": "^7.1.0",
+    "joi": "^17.13.3",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.10",
+    "prisma": "^6.10.0",
+    "supertest": "^7.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

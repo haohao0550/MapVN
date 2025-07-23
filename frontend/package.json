@@ -1,0 +1,42 @@
+{
+  "name": "dthub-frontend",
+  "version": "1.0.0",
+  "description": "DTHub Platform Frontend Application",
+  "private": true,
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev",
+    "lint": "next lint",
+    "start": "next start",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@radix-ui/react-slot": "^1.2.3",
+    "@types/node": "^20.12.0",
+    "@types/react": "^18.3.23",
+    "@types/react-dom": "^18.3.7",
+    "autoprefixer": "^10.4.19",
+    "axios": "^1.7.2",
+    "cesium": "^1.117.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.376.0",
+    "next": "^14.2.0",
+    "postcss": "^8.4.38",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "resium": "^1.17.3",
+    "tailwind-merge": "^2.6.0",
+    "tailwindcss": "^3.4.3",
+    "tailwindcss-animate": "^1.0.7",
+    "typescript": "^5.4.0"
+  },
+  "devDependencies": {
+    "copy-webpack-plugin": "^13.0.0",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "^14.2.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

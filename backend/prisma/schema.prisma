@@ -1,0 +1,121 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String
+  password  String
+  role      Role     @default(USER)
+  avatar    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  models    Model[]
+  geojsons  GeoJson[]
+  
+  @@map("users")
+}
+
+model Category {
+  id          String     @id @default(uuid())
+  name        String
+  description String?
+  parentId    String?
+  color       String?
+  icon        String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  
+  // Relations
+  parent      Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryHierarchy")
+  models      Model[]
+  geojsons    GeoJson[]
+  
+  @@map("categories")
+}
+
+model Model {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  filePath    String
+  fileSize    Int?
+  mimeType    String?
+  thumbnail   String?
+  
+  // Spatial properties
+  latitude    Float?
+  longitude   Float?
+  altitude    Float?   @default(0)
+  heading     Float?   @default(0)
+  pitch       Float?   @default(0)
+  roll        Float?   @default(0)
+  scale       Float?   @default(1)
+  
+  // Metadata
+  isPublic    Boolean  @default(true)
+  isActive    Boolean  @default(true)
+  
+  // Relations
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("models")
+}
+
+model GeoJson {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  type        GeoJsonType
+  data        Json     // GeoJSON data
+  
+  // Metadata
+  isPublic    Boolean  @default(true)
+  isActive    Boolean  @default(true)
+  
+  // Relations
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("geojsons")
+}
+
+enum Role {
+  ADMIN
+  USER
+  VIEWER
+}
+
+enum GeoJsonType {
+  POINT
+  LINESTRING
+  POLYGON
+  MULTIPOINT
+  MULTILINESTRING
+  MULTIPOLYGON
+  FEATURE
+  FEATURECOLLECTION
+}
