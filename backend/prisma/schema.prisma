@@ -50,23 +50,25 @@ model Model {
   id          String   @id @default(uuid())
   name        String
   description String?
-  filePath    String
+  url         String   // File path trong organized structure
   fileSize    Int?
   mimeType    String?
   thumbnail   String?
   
-  // Spatial properties
-  latitude    Float?
-  longitude   Float?
-  altitude    Float?   @default(0)
-  heading     Float?   @default(0)
-  pitch       Float?   @default(0)
-  roll        Float?   @default(0)
-  scale       Float?   @default(1)
+  // Spatial positioning
+  longitude   Float    
+  latitude    Float    
+  height      Float    @default(0)
+  scale       Float    @default(1.0)
+  heading     Float    @default(0)
+  pitch       Float    @default(0)
+  roll        Float    @default(0)
   
   // Metadata
+  modelCategory String?
+  tags        String[]
   isPublic    Boolean  @default(true)
-  isActive    Boolean  @default(true)
+  active      Boolean  @default(true)
   
   // Relations
   userId      String

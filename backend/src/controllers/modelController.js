@@ -1,15 +1,51 @@
 const { PrismaClient } = require('@prisma/client');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs-extra');
+const { v4: uuidv4 } = require('uuid');
+const modelProcessingService = require('../services/modelProcessingService');
 
 const prisma = new PrismaClient();
 
+// Configure multer for GLB file uploads
+const storage = multer.diskStorage({
+  destination: async (req, file, cb) => {
+    const uploadsDir = path.join(__dirname, '../../../uploads');
+    await fs.ensureDir(uploadsDir);
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueName = `${uuidv4()}-${Date.now()}${path.extname(file.originalname)}`;
+    cb(null, uniqueName);
+  }
+});
+
+const fileFilter = (req, file, cb) => {
+  // Accept only GLB files
+  if (file.mimetype === 'model/gltf-binary' || file.originalname.toLowerCase().endsWith('.glb')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only GLB files are allowed'), false);
+  }
+};
+
+const upload = multer({
+  storage,
+  fileFilter,
+  limits: {
+    fileSize: 100 * 1024 * 1024 // 100MB limit
+  }
+});
+
 const getModels = async (req, res) => {
   try {
-    const { page = 1, limit = 10, category, search } = req.query;
+    const { page = 1, limit = 10, category, search, userId } = req.query;
     const skip = (page - 1) * limit;
 
     const where = {
-      isActive: true,
-      ...(category && { categoryId: category }),
+      active: true,
+      ...(category && { modelCategory: category }),
+      ...(userId && { userId }),
       ...(search && {
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
@@ -93,59 +129,112 @@ const getModel = async (req, res) => {
   }
 };
 
-const createModel = async (req, res) => {
+const uploadModel = async (req, res) => {
   try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No GLB file uploaded'
+      });
+    }
+
     const {
       name,
       description,
-      latitude,
-      longitude,
-      altitude = 0,
+      cameraLongitude,
+      cameraLatitude,
+      cameraHeight,
+      scale = 1.0,
       heading = 0,
       pitch = 0,
       roll = 0,
-      scale = 1,
-      categoryId,
+      category,
+      tags = [],
       isPublic = true
     } = req.body;
 
+    // Parse coordinates
+    const longitude = parseFloat(cameraLongitude);
+    const latitude = parseFloat(cameraLatitude);
+    const height = parseFloat(cameraHeight);
+
+    if (isNaN(longitude) || isNaN(latitude) || isNaN(height)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid camera coordinates provided'
+      });
+    }
+
+    // Calculate ground position (place model at or slightly above ground)
+    let modelHeight = height - 5; // 5 meters below camera
+    
+    // Ensure minimum height (models shouldn't be underground)
+    if (modelHeight < 0) {
+      modelHeight = 10; // Default 10m above sea level if calculated height is negative
+    }
+    
+    const groundPosition = {
+      longitude,
+      latitude,
+      height: modelHeight
+    };
+
+    const modelId = uuidv4();
+
+    // Process GLB to B3DM
+    console.log('Processing GLB file for model:', modelId);
+    const processingResult = await modelProcessingService.processGlbToB3dm(
+      req.file.path,
+      modelId
+    );
+
+    // Create model record in database
     const model = await prisma.model.create({
       data: {
+        id: modelId,
         name,
         description,
-        filePath: req.file ? `/uploads/${req.file.filename}` : null,
-        fileSize: req.file ? req.file.size : null,
-        mimeType: req.file ? req.file.mimetype : null,
-        latitude: latitude ? parseFloat(latitude) : null,
-        longitude: longitude ? parseFloat(longitude) : null,
-        altitude: parseFloat(altitude),
+        url: processingResult.url,
+        fileSize: req.file.size,
+        mimeType: req.file.mimetype,
+        longitude: groundPosition.longitude,
+        latitude: groundPosition.latitude,
+        height: groundPosition.height,
+        scale: parseFloat(scale),
         heading: parseFloat(heading),
         pitch: parseFloat(pitch),
         roll: parseFloat(roll),
-        scale: parseFloat(scale),
-        categoryId,
+        modelCategory: category,
+        tags: Array.isArray(tags) ? tags : [tags].filter(Boolean),
         isPublic: Boolean(isPublic),
         userId: req.user.id
       },
       include: {
         user: {
           select: { id: true, name: true, email: true }
-        },
-        category: {
-          select: { id: true, name: true, color: true, icon: true }
         }
       }
     });
 
     res.status(201).json({
       success: true,
-      message: 'Model created successfully',
-      data: model
+      message: 'Model uploaded and processed successfully',
+      data: {
+        ...model,
+        processingResult
+      }
     });
   } catch (error) {
+    console.error('Error uploading model:', error);
+    
+    // Clean up uploaded file if processing failed
+    if (req.file && fs.existsSync(req.file.path)) {
+      await fs.remove(req.file.path).catch(console.error);
+    }
+
     res.status(500).json({
       success: false,
-      message: 'Failed to create model',
+      message: 'Failed to upload and process model',
       error: error.message
     });
   }
@@ -154,7 +243,20 @@ const createModel = async (req, res) => {
 const updateModel = async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
+    const {
+      name,
+      description,
+      longitude,
+      latitude,
+      height,
+      scale,
+      heading,
+      pitch,
+      roll,
+      category,
+      tags,
+      isPublic
+    } = req.body;
 
     // Check if model exists and user owns it (or is admin)
     const existingModel = await prisma.model.findUnique({
@@ -174,6 +276,23 @@ const updateModel = async (req, res) => {
         message: 'Not authorized to update this model'
       });
     }
+
+    // Prepare update data
+    const updateData = {};
+    if (name !== undefined) updateData.name = name;
+    if (description !== undefined) updateData.description = description;
+    if (longitude !== undefined) updateData.longitude = parseFloat(longitude);
+    if (latitude !== undefined) updateData.latitude = parseFloat(latitude);
+    if (height !== undefined) updateData.height = parseFloat(height);
+    if (scale !== undefined) updateData.scale = parseFloat(scale);
+    if (heading !== undefined) updateData.heading = parseFloat(heading);
+    if (pitch !== undefined) updateData.pitch = parseFloat(pitch);
+    if (roll !== undefined) updateData.roll = parseFloat(roll);
+    if (category !== undefined) updateData.modelCategory = category;
+    if (tags !== undefined) updateData.tags = Array.isArray(tags) ? tags : [tags].filter(Boolean);
+    if (isPublic !== undefined) updateData.isPublic = Boolean(isPublic);
+    
+    updateData.updatedAt = new Date();
 
     const model = await prisma.model.update({
       where: { id },
@@ -225,6 +344,10 @@ const deleteModel = async (req, res) => {
       });
     }
 
+    // Delete model files
+    await modelProcessingService.deleteModelFiles(id);
+
+    // Delete from database
     await prisma.model.delete({
       where: { id }
     });
@@ -243,9 +366,10 @@ const deleteModel = async (req, res) => {
 };
 
 module.exports = {
+  upload,
   getModels,
   getModel,
-  createModel,
+  uploadModel,
   updateModel,
   deleteModel
 };

@@ -1,43 +1,15 @@
 const express = require('express');
-const multer = require('multer');
-const path = require('path');
 const { 
+  upload,
   getModels, 
   getModel, 
-  createModel, 
+  uploadModel, 
   updateModel, 
   deleteModel 
 } = require('../controllers/modelController');
 const { auth } = require('../middleware/auth');
 
 const router = express.Router();
-
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/');
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const upload = multer({
-  storage,
-  limits: {
-    fileSize: 50 * 1024 * 1024 // 50MB limit
-  },
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = ['.glb', '.gltf', '.obj', '.fbx', '.dae'];
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (allowedTypes.includes(ext)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Invalid file type. Only 3D model files are allowed.'));
-    }
-  }
-});
 
 // @route   GET /api/models
 // @desc    Get all models
@@ -49,13 +21,13 @@ router.get('/', getModels);
 // @access  Public
 router.get('/:id', getModel);
 
-// @route   POST /api/models
-// @desc    Create new model
+// @route   POST /api/models/upload
+// @desc    Upload and process GLB model
 // @access  Private
-router.post('/', auth, upload.single('model'), createModel);
+router.post('/upload', auth, upload.single('glbFile'), uploadModel);
 
 // @route   PUT /api/models/:id
-// @desc    Update model
+// @desc    Update model properties (position, rotation, etc.)
 // @access  Private
 router.put('/:id', auth, updateModel);
 

@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 require('dotenv').config();
 
 // Import middleware
@@ -40,6 +41,13 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Static files
 app.use('/uploads', express.static('uploads'));
+app.use('/3dmodel', express.static(path.join(__dirname, '../../wwwroot/3dmodel')));
+app.use('/geojsonmodel', express.static(path.join(__dirname, '../../wwwroot/geojsonmodel')));
+
+// Handle favicon.ico requests
+app.get('/favicon.ico', (req, res) => {
+  res.status(204).end(); // No Content
+});
 
 // Health check
 app.get('/health', (req, res) => {

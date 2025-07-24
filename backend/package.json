@@ -24,16 +24,20 @@
   "license": "MIT",
   "dependencies": {
     "@prisma/client": "^6.10.0",
+    "3d-tiles-tools": "^0.5.0",
     "bcryptjs": "^2.4.3",
+    "child_process": "^1.0.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
     "express-rate-limit": "^7.4.0",
     "express-validator": "^7.2.0",
+    "fs-extra": "^11.3.0",
     "helmet": "^7.1.0",
     "joi": "^17.13.3",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
+    "path": "^0.12.7",
     "uuid": "^10.0.0"
   },
   "devDependencies": {
