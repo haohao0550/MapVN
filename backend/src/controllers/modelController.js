@@ -165,19 +165,12 @@ const uploadModel = async (req, res) => {
       });
     }
 
-    // Calculate ground position (place model at or slightly above ground)
-    let modelHeight = height - 5; // 5 meters below camera
-    
-    // Ensure minimum height (models shouldn't be underground)
-    if (modelHeight < 0) {
-      modelHeight = 10; // Default 10m above sea level if calculated height is negative
-    }
-    
-    const groundPosition = {
+    // Calculate ground position (5 meters below camera)
+    const groundPosition = modelProcessingService.calculateGroundPosition({
       longitude,
       latitude,
-      height: modelHeight
-    };
+      height
+    }, -5);
 
     const modelId = uuidv4();
 

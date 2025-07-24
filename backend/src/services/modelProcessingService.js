@@ -37,29 +37,11 @@ class ModelProcessingService {
       const convertCommand = `npx 3d-tiles-tools glbToB3dm "${glbFilePath}" "${b3dmFilePath}"`;
       
       console.log('Converting GLB to B3DM:', convertCommand);
-      
-      try {
-        const { stdout, stderr } = await execAsync(convertCommand);
-        console.log('GLB conversion stdout:', stdout);
-        if (stderr) {
-          console.log('GLB conversion stderr:', stderr);
-        }
-        
-        // Create tileset.json for B3DM
-        const tilesetContent = this.createTilesetJson(modelId);
-        await fs.writeJson(tilesetPath, tilesetContent, { spaces: 2 });
-        
-      } catch (conversionError) {
-        console.error('GLB conversion failed:', conversionError);
-        
-        // Fallback: Just copy the GLB file as a simple model
-        console.log('Falling back to copying GLB file...');
-        await fs.copy(glbFilePath, path.join(modelOutputDir, 'model.glb'));
-        
-        // Create a simple tileset.json that references the GLB directly
-        const fallbackTileset = this.createFallbackTilesetJson(modelId);
-        await fs.writeJson(tilesetPath, fallbackTileset, { spaces: 2 });
-      }
+      await execAsync(convertCommand);
+
+      // Create tileset.json
+      const tilesetContent = this.createTilesetJson(modelId);
+      await fs.writeJson(tilesetPath, tilesetContent, { spaces: 2 });
 
       // Clean up original GLB file
       await fs.remove(glbFilePath);
@@ -78,7 +60,7 @@ class ModelProcessingService {
   }
 
   /**
-   * Create tileset.json configuration for B3DM
+   * Create tileset.json configuration
    * @param {string} modelId - Model ID
    * @returns {Object} - Tileset configuration
    */
@@ -98,32 +80,6 @@ class ModelProcessingService {
         refine: "REPLACE",
         content: {
           uri: "model.b3dm"
-        }
-      }
-    };
-  }
-
-  /**
-   * Create fallback tileset.json for GLB files (when B3DM conversion fails)
-   * @param {string} modelId - Model ID
-   * @returns {Object} - Fallback tileset configuration
-   */
-  createFallbackTilesetJson(modelId) {
-    return {
-      asset: {
-        version: "1.0",
-        tilesetVersion: "1.0.0"
-      },
-      properties: {},
-      geometricError: 500,
-      root: {
-        boundingVolume: {
-          box: [0, 0, 0, 100, 0, 0, 0, 100, 0, 0, 0, 100]
-        },
-        geometricError: 100,
-        refine: "REPLACE",
-        content: {
-          uri: "model.glb"
         }
       }
     };

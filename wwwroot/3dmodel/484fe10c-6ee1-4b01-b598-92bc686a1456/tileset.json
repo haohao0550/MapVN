@@ -1,0 +1,31 @@
+{
+  "asset": {
+    "version": "1.0",
+    "tilesetVersion": "1.0.0"
+  },
+  "properties": {},
+  "geometricError": 500,
+  "root": {
+    "boundingVolume": {
+      "box": [
+        0,
+        0,
+        0,
+        100,
+        0,
+        0,
+        0,
+        100,
+        0,
+        0,
+        0,
+        100
+      ]
+    },
+    "geometricError": 100,
+    "refine": "REPLACE",
+    "content": {
+      "uri": "model.glb"
+    }
+  }
+}
