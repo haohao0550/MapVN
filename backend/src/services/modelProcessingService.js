@@ -18,7 +18,7 @@ class ModelProcessingService {
   }
 
   /**
-   * Process GLB file and convert to B3DM format
+   * Process GLB file and convert to 3D Tiles format
    * @param {string} glbFilePath - Path to the uploaded GLB file
    * @param {string} modelId - Unique model ID
    * @returns {Promise<Object>} - Processing result
@@ -31,27 +31,26 @@ class ModelProcessingService {
       await fs.ensureDir(modelOutputDir);
 
       const b3dmFilePath = path.join(modelOutputDir, 'model.b3dm');
-      const tilesetPath = path.join(modelOutputDir, 'tileset.json');
 
-      // Convert GLB to B3DM using 3d-tiles-tools
-      const convertCommand = `npx 3d-tiles-tools glbToB3dm "${glbFilePath}" "${b3dmFilePath}"`;
+      // Convert GLB to B3DM using 3d-tiles-tools CLI
+      console.log('Converting GLB to B3DM for model:', modelId);
       
-      console.log('Converting GLB to B3DM:', convertCommand);
+      const convertCommand = `npx 3d-tiles-tools glbToB3dm -i "${glbFilePath}" -o "${b3dmFilePath}"`;
+      console.log('Executing command:', convertCommand);
+      
       await execAsync(convertCommand);
-
-      // Create tileset.json
-      const tilesetContent = this.createTilesetJson(modelId);
-      await fs.writeJson(tilesetPath, tilesetContent, { spaces: 2 });
 
       // Clean up original GLB file
       await fs.remove(glbFilePath);
 
+      const fileStats = await this.getFileStats(b3dmFilePath);
+
       return {
         success: true,
         b3dmPath: b3dmFilePath,
-        tilesetPath: tilesetPath,
         modelDir: modelOutputDir,
-        url: `/3dmodel/${modelId}/tileset.json`
+        url: `/3dmodel/${modelId}/tileset.json`, // API endpoint, not file path
+        fileSize: fileStats?.size || 0
       };
     } catch (error) {
       console.error('Error processing GLB to B3DM:', error);
@@ -60,29 +59,76 @@ class ModelProcessingService {
   }
 
   /**
-   * Create tileset.json configuration
+   * Create transformation matrix for positioning model in world coordinates
+   * @param {Object} position - Position {longitude, latitude, height}
+   * @returns {Array} - 4x4 transformation matrix
+   */
+  createTransformMatrix(position) {
+    const { longitude, latitude, height } = position;
+    
+    // Convert degrees to radians
+    const lonRad = longitude * Math.PI / 180;
+    const latRad = latitude * Math.PI / 180;
+    
+    // Earth's radius in meters
+    const earthRadius = 6378137.0;
+    
+    // Calculate Cartesian coordinates
+    const cosLat = Math.cos(latRad);
+    const sinLat = Math.sin(latRad);
+    const cosLon = Math.cos(lonRad);
+    const sinLon = Math.sin(lonRad);
+    
+    const x = (earthRadius + height) * cosLat * cosLon;
+    const y = (earthRadius + height) * cosLat * sinLon;
+    const z = (earthRadius + height) * sinLat;
+    
+    // Create transformation matrix (column-major order for Cesium)
+    return [
+      1, 0, 0, 0,
+      0, 1, 0, 0,
+      0, 0, 1, 0,
+      x, y, z, 1
+    ];
+  }
+
+  /**
+   * Generate tileset.json dynamically for a model
    * @param {string} modelId - Model ID
+   * @param {Object} model - Model data from database
    * @returns {Object} - Tileset configuration
    */
-  createTilesetJson(modelId) {
-    return {
+  generateTilesetJson(modelId, model) {
+    const tileset = {
       asset: {
-        version: "1.0",
-        tilesetVersion: "1.0.0"
+        version: "1.1",
+        tilesetVersion: "1.0.0",
+        generator: "DTHub 3D Tiles Converter"
       },
       properties: {},
       geometricError: 500,
       root: {
         boundingVolume: {
-          box: [0, 0, 0, 100, 0, 0, 0, 100, 0, 0, 0, 100]
+          box: [0, 0, 0, 50, 0, 0, 0, 50, 0, 0, 0, 50]
         },
-        geometricError: 100,
+        geometricError: 16,
         refine: "REPLACE",
         content: {
-          uri: "model.b3dm"
+          uri: `model.b3dm`
         }
       }
     };
+
+    // Add transformation matrix if model position is available
+    if (model && model.longitude !== undefined && model.latitude !== undefined && model.height !== undefined) {
+      tileset.root.transform = this.createTransformMatrix({
+        longitude: model.longitude,
+        latitude: model.latitude,
+        height: model.height
+      });
+    }
+
+    return tileset;
   }
 
   /**
@@ -97,6 +143,36 @@ class ModelProcessingService {
       latitude: cameraPosition.latitude,
       height: cameraPosition.height + offset
     };
+  }
+
+  /**
+   * Get tileset information for a model
+   * @param {string} modelId - Model ID
+   * @param {Object} model - Model data from database
+   * @returns {Promise<Object>} - Tileset data
+   */
+  async getTilesetInfo(modelId, model) {
+    try {
+      const b3dmPath = path.join(this.modelsDir, modelId, 'model.b3dm');
+      
+      if (!await fs.pathExists(b3dmPath)) {
+        throw new Error('B3DM file not found');
+      }
+      
+      const tileset = this.generateTilesetJson(modelId, model);
+      const stats = await this.getFileStats(b3dmPath);
+      
+      return {
+        tileset,
+        tilesetUrl: `/3dmodel/${modelId}/tileset.json`,
+        b3dmUrl: `/3dmodel/${modelId}/model.b3dm`,
+        fileSize: stats?.size || 0,
+        lastModified: stats?.modified
+      };
+    } catch (error) {
+      console.error('Error getting tileset info:', error);
+      throw error;
+    }
   }
 
   /**

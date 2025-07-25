@@ -5,9 +5,18 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:4000';
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
+    const path = searchParams.get('path') || '';
     const queryString = searchParams.toString();
     
-    const response = await fetch(`${BACKEND_URL}/api/models${queryString ? `?${queryString}` : ''}`, {
+    // Handle specific endpoints
+    let url = `${BACKEND_URL}/api/models`;
+    if (path === 'active') {
+      url = `${BACKEND_URL}/api/models/active`;
+    } else if (queryString) {
+      url = `${BACKEND_URL}/api/models?${queryString}`;
+    }
+    
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Authorization': req.headers.get('Authorization') || '',
@@ -15,6 +24,16 @@ export async function GET(req: NextRequest) {
     });
 
     const data = await response.json();
+    
+    // If this is active models, ensure tilesetUrl has full backend URL
+    if (path === 'active' && data.success && data.data) {
+      data.data = data.data.map((model: any) => ({
+        ...model,
+        tilesetUrl: model.tilesetUrl.startsWith('http') 
+          ? model.tilesetUrl 
+          : `${BACKEND_URL}${model.tilesetUrl}`
+      }));
+    }
     
     return NextResponse.json(data, { status: response.status });
   } catch (error) {

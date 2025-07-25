@@ -39,10 +39,54 @@ app.use('/api/', limiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Static files
+// Static files with CORS headers for 3D Tiles
+const corsStaticMiddleware = (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  
+  // Set appropriate content types for 3D Tiles files
+  if (req.path.endsWith('.json')) {
+    res.type('application/json');
+  } else if (req.path.endsWith('.b3dm')) {
+    res.type('application/octet-stream');
+  } else if (req.path.endsWith('.i3dm')) {
+    res.type('application/octet-stream');
+  } else if (req.path.endsWith('.pnts')) {
+    res.type('application/octet-stream');
+  } else if (req.path.endsWith('.cmpt')) {
+    res.type('application/octet-stream');
+  }
+  
+  next();
+};
+
 app.use('/uploads', express.static('uploads'));
-app.use('/3dmodel', express.static(path.join(__dirname, '../../wwwroot/3dmodel')));
+app.use('/models', corsStaticMiddleware, express.static(path.join(__dirname, '../../wwwroot/models')));
+app.use('/3dmodel', corsStaticMiddleware, express.static(path.join(__dirname, '../../wwwroot/3dmodel')));
 app.use('/geojsonmodel', express.static(path.join(__dirname, '../../wwwroot/geojsonmodel')));
+
+// Dynamic tileset.json endpoint
+app.get('/3dmodel/:modelId/tileset.json', async (req, res) => {
+  try {
+    const { modelId } = req.params;
+    const { getModelTileset } = require('./controllers/modelController');
+    
+    const result = await getModelTileset(modelId);
+    
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    
+    res.json(result.data.tileset);
+  } catch (error) {
+    console.error('Error serving tileset:', error);
+    res.status(404).json({
+      error: 'Tileset not found',
+      message: error.message
+    });
+  }
+});
 
 // Handle favicon.ico requests
 app.get('/favicon.ico', (req, res) => {

@@ -7,7 +7,7 @@ import AuthPage from '@/components/AuthPage';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { MapPin, Upload, List, Settings, LogOut, User } from 'lucide-react';
+import { MapPin, Upload, List, Settings, LogOut, User, Navigation } from 'lucide-react';
 
 interface Model {
   id: string;
@@ -46,6 +46,7 @@ const MapViewer: React.FC = () => {
   const [cameraPosition, setCameraPosition] = useState<CameraPosition | null>(null);
   const [selectedModel, setSelectedModel] = useState<Model | null>(null);
   const [loading, setLoading] = useState(false);
+  const [flyToModelId, setFlyToModelId] = useState<string | undefined>(undefined);
 
   // Check for existing authentication on component mount
   useEffect(() => {
@@ -96,13 +97,22 @@ const MapViewer: React.FC = () => {
     setSelectedModel(model);
   }, []);
 
+  // Handle fly to model
+  const handleFlyToModel = useCallback((modelId: string) => {
+    setFlyToModelId(modelId);
+    // Reset after a short delay to allow re-triggering
+    setTimeout(() => setFlyToModelId(undefined), 100);
+  }, []);
+
   // Load models from API
   const loadModels = useCallback(async () => {
     if (!authToken) return;
     
     setLoading(true);
     try {
-      const response = await fetch('/api/models', {
+      // Call backend directly
+      const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+      const response = await fetch(`${BACKEND_URL}/api/models/active-for-map`, {
         headers: {
           'Authorization': `Bearer ${authToken}`
         }
@@ -110,7 +120,16 @@ const MapViewer: React.FC = () => {
       const result = await response.json();
       
       if (result.success) {
-        setModels(result.data.models);
+        // Ensure tilesetUrl has full backend URL
+        const modelsWithFullUrls = result.data.map((model: any) => ({
+          ...model,
+          tilesetUrl: model.tilesetUrl.startsWith('http') 
+            ? model.tilesetUrl 
+            : `${BACKEND_URL}${model.tilesetUrl}`
+        }));
+        
+        setModels(modelsWithFullUrls);
+        console.log('Loaded active models for map:', modelsWithFullUrls);
       } else {
         console.error('Failed to load models:', result.message);
       }
@@ -208,15 +227,30 @@ const MapViewer: React.FC = () => {
                   models.map((model) => (
                     <Card
                       key={model.id}
-                      className={`p-4 cursor-pointer transition-colors ${
+                      className={`p-4 transition-colors ${
                         selectedModel?.id === model.id
                           ? 'bg-blue-50 border-blue-200'
                           : 'hover:bg-gray-50'
                       }`}
-                      onClick={() => setSelectedModel(model)}
                     >
                       <div className="space-y-2">
-                        <h3 className="font-medium text-gray-800">{model.name}</h3>
+                        <div className="flex items-center justify-between">
+                          <h3 
+                            className="font-medium text-gray-800 cursor-pointer"
+                            onClick={() => setSelectedModel(model)}
+                          >
+                            {model.name}
+                          </h3>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleFlyToModel(model.id)}
+                            className="ml-2"
+                          >
+                            <Navigation className="w-3 h-3 mr-1" />
+                            Fly To
+                          </Button>
+                        </div>
                         {model.description && (
                           <p className="text-sm text-gray-600">{model.description}</p>
                         )}
@@ -255,6 +289,7 @@ const MapViewer: React.FC = () => {
             models={models}
             onCameraMove={handleCameraMove}
             onModelClick={handleModelClick}
+            flyToModel={flyToModelId}
           />
 
           {/* Model Details Overlay */}

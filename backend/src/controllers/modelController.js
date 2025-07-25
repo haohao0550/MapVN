@@ -165,12 +165,12 @@ const uploadModel = async (req, res) => {
       });
     }
 
-    // Calculate ground position (5 meters below camera)
-    const groundPosition = modelProcessingService.calculateGroundPosition({
-      longitude,
-      latitude,
-      height
-    }, -5);
+    // Calculate ground position (place model on ground, not at camera height)
+    const groundPosition = {
+      longitude: longitude,
+      latitude: latitude,
+      height: 0 // Place model on ground level
+    };
 
     const modelId = uuidv4();
 
@@ -188,7 +188,7 @@ const uploadModel = async (req, res) => {
         name,
         description,
         url: processingResult.url,
-        fileSize: req.file.size,
+        fileSize: processingResult.fileSize,
         mimeType: req.file.mimetype,
         longitude: groundPosition.longitude,
         latitude: groundPosition.latitude,
@@ -214,7 +214,7 @@ const uploadModel = async (req, res) => {
       message: 'Model uploaded and processed successfully',
       data: {
         ...model,
-        processingResult
+        tilesetUrl: processingResult.url
       }
     });
   } catch (error) {
@@ -358,10 +358,105 @@ const deleteModel = async (req, res) => {
   }
 };
 
+const getActiveModelsForMap = async (req, res) => {
+  try {
+    const models = await prisma.model.findMany({
+      where: {
+        active: true,
+        isPublic: true
+      },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        url: true,
+        longitude: true,
+        latitude: true,
+        height: true,
+        scale: true,
+        heading: true,
+        pitch: true,
+        roll: true,
+        modelCategory: true,
+        tags: true,
+        createdAt: true,
+        user: {
+          select: { id: true, name: true }
+        },
+        category: {
+          select: { id: true, name: true, color: true, icon: true }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    // Add tileset URL for each model
+    const modelsWithTilesets = models.map(model => ({
+      ...model,
+      tilesetUrl: `/3dmodel/${model.id}/tileset.json`,
+      position: {
+        longitude: model.longitude,
+        latitude: model.latitude,
+        height: model.height
+      },
+      orientation: {
+        heading: model.heading,
+        pitch: model.pitch,
+        roll: model.roll
+      }
+    }));
+
+    res.json({
+      success: true,
+      data: modelsWithTilesets,
+      count: modelsWithTilesets.length
+    });
+  } catch (error) {
+    console.error('Error getting active models for map:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get active models',
+      error: error.message
+    });
+  }
+};
+
+const getModelTileset = async (modelId) => {
+  const model = await prisma.model.findUnique({
+    where: { id: modelId },
+    include: {
+      user: {
+        select: { id: true, name: true, email: true }
+      },
+      category: {
+        select: { id: true, name: true, color: true, icon: true }
+      }
+    }
+  });
+
+  if (!model) {
+    throw new Error('Model not found');
+  }
+
+  // Generate tileset.json dynamically
+  const tilesetInfo = await modelProcessingService.getTilesetInfo(modelId, model);
+  
+  return {
+    success: true,
+    data: {
+      model,
+      tileset: tilesetInfo.tileset,
+      tilesetUrl: tilesetInfo.tilesetUrl
+    }
+  };
+};
+
 module.exports = {
   upload,
   getModels,
   getModel,
+  getActiveModelsForMap,
+  getModelTileset,
   uploadModel,
   updateModel,
   deleteModel

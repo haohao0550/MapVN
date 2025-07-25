@@ -16,7 +16,6 @@ interface CesiumMapProps {
   onModelClick?: (model: any) => void;
   onMapClick?: (position: { latitude: number; longitude: number; altitude: number }) => void;
   onCameraMove?: (position: CameraPosition) => void;
-  flyToModel?: string; // Model ID to fly to
 }
 
 // ===== SIMPLE CESIUM VIEWER =====
@@ -25,66 +24,13 @@ const SimpleCesiumViewer: React.FC<CesiumMapProps> = ({
   geojsons = [],
   onModelClick,
   onMapClick,
-  onCameraMove,
-  flyToModel
+  onCameraMove
 }) => {
   const cesiumContainerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const modelsRef = useRef<any[]>([]);
-
-  // Debug: Log models prop changes
-  useEffect(() => {
-    console.log('CesiumMap models prop changed:', models);
-    console.log('Models count:', models.length);
-    if (models.length > 0) {
-      console.log('First model:', models[0]);
-    }
-  }, [models]);
-
-  const flyToModelById = useCallback(async (modelId: string, Cesium: any) => {
-    if (!viewerRef.current || !modelId) return;
-
-    // Find the model in our refs
-    const modelRef = modelsRef.current.find(ref => ref.modelData.id === modelId);
-    if (modelRef && modelRef.primitive) {
-      try {
-        console.log(`Flying to model: ${modelRef.name}`);
-        await viewerRef.current.zoomTo(modelRef.primitive, new Cesium.HeadingPitchRange(0.0, -0.3, 100.0));
-        console.log(`Successfully flew to model: ${modelRef.name}`);
-      } catch (error) {
-        console.error(`Error flying to model ${modelRef.name}:`, error);
-      }
-    } else {
-      // If not found in primitives, try to fly to model coordinates
-      const model = models.find(m => m.id === modelId);
-      if (model) {
-        try {
-          console.log(`Flying to model coordinates: ${model.name} at ${model.longitude}, ${model.latitude}`);
-          await viewerRef.current.camera.flyTo({
-            destination: Cesium.Cartesian3.fromDegrees(
-              model.longitude, 
-              model.latitude, 
-              model.height + 1000 // Add 1000m height for better view
-            ),
-            duration: 3.0
-          });
-          console.log(`Successfully flew to model coordinates: ${model.name}`);
-        } catch (error) {
-          console.error(`Error flying to model coordinates ${model.name}:`, error);
-        }
-      }
-    }
-  }, [models]);
-
-  // Handle flyToModel prop changes
-  useEffect(() => {
-    if (flyToModel && viewerRef.current) {
-      import('cesium').then((Cesium) => {
-        flyToModelById(flyToModel, Cesium);
-      });
-    }
-  }, [flyToModel, flyToModelById]);
 
   const getCameraPosition = useCallback(() => {
     if (!viewerRef.current) return null;
@@ -100,10 +46,7 @@ const SimpleCesiumViewer: React.FC<CesiumMapProps> = ({
   }, []);
 
   const loadModels = useCallback(async (Cesium: any) => {
-    if (!viewerRef.current || !models.length) {
-      console.log('No viewer or models to load');
-      return;
-    }
+    if (!viewerRef.current || !models.length) return;
 
     console.log(`Loading ${models.length} models...`);
 
@@ -119,24 +62,34 @@ const SimpleCesiumViewer: React.FC<CesiumMapProps> = ({
     });
     modelsRef.current = [];
 
-    // Load new models as 3D Tilesets using Cesium pattern
+    // Load new models as 3D Tilesets
     for (const model of models) {
       try {
         console.log(`Loading 3D Tiles model: ${model.name} from ${model.tilesetUrl || model.url}`);
         
         const tilesetUrl = model.tilesetUrl || model.url;
         
-        // Ensure full URL
-        const fullUrl = tilesetUrl.startsWith('http') 
-          ? tilesetUrl 
-          : `http://localhost:4000${tilesetUrl}`;
+        // Create tileset with error handling
+        console.log(`Creating tileset for URL: ${tilesetUrl}`);
         
-        console.log(`Full tileset URL: ${fullUrl}`);
+        // Test URL accessibility first
+        try {
+          const testResponse = await fetch(tilesetUrl);
+          if (!testResponse.ok) {
+            console.error(`Tileset URL not accessible: ${tilesetUrl}, status: ${testResponse.status}`);
+            continue;
+          }
+          console.log(`Tileset URL accessible: ${tilesetUrl}`);
+        } catch (fetchError) {
+          console.error(`Failed to fetch tileset from ${tilesetUrl}:`, fetchError);
+          continue;
+        }
 
-        // Use Cesium.Cesium3DTileset.fromUrl pattern like in Sandcastle
         let tileset;
         try {
-          tileset = await Cesium.Cesium3DTileset.fromUrl(fullUrl, {
+          // Use constructor method with proper error handling
+          tileset = new Cesium.Cesium3DTileset({
+            url: tilesetUrl,
             debugShowBoundingVolume: false,
             debugShowContentBoundingVolume: false,
           });
@@ -152,26 +105,34 @@ const SimpleCesiumViewer: React.FC<CesiumMapProps> = ({
           continue;
         }
 
-        // Add to scene like in Sandcastle
-        viewerRef.current.scene.primitives.add(tileset);
+        // Add to scene
+        const addedTileset = viewerRef.current.scene.primitives.add(tileset);
         console.log(`Tileset added to scene: ${model.name}`);
 
         // Store reference for cleanup
         const modelRef = {
-          primitive: tileset,
+          primitive: addedTileset,
           modelData: model,
           name: model.name,
-          isDestroyed: () => tileset ? tileset.isDestroyed() : true
+          isDestroyed: () => addedTileset ? addedTileset.isDestroyed() : true
         };
         
         modelsRef.current.push(modelRef);
 
-        // Zoom to tileset like in Sandcastle
-        try {
-          await viewerRef.current.zoomTo(tileset, new Cesium.HeadingPitchRange(0.0, -0.3, 0.0));
-          console.log(`Zoomed to tileset: ${model.name}`);
-        } catch (zoomError) {
-          console.error(`Error zooming to tileset ${model.name}:`, zoomError);
+        // Wait for tileset to load
+        if (addedTileset && addedTileset.readyPromise) {
+          try {
+            await addedTileset.readyPromise;
+            console.log(`3D Tiles loaded successfully: ${model.name}`);
+            
+            // Optional: Fly to the tileset if it's the only one
+            if (models.length === 1) {
+              await viewerRef.current.zoomTo(addedTileset);
+              console.log(`Zoomed to tileset: ${model.name}`);
+            }
+          } catch (readyError) {
+            console.error(`Error waiting for tileset ${model.name}:`, readyError);
+          }
         }
 
         console.log(`Added 3D Tiles: ${model.name} at ${model.longitude}, ${model.latitude}`);
@@ -204,6 +165,7 @@ const SimpleCesiumViewer: React.FC<CesiumMapProps> = ({
         
         if (!checkWebGLSupport()) {
           setError('WebGL is not supported in this browser. Please update your browser or graphics drivers.');
+          setIsLoading(false);
           return;
         }
 
@@ -302,11 +264,13 @@ const SimpleCesiumViewer: React.FC<CesiumMapProps> = ({
         // Load models
         await loadModels(Cesium);
 
+        setIsLoading(false);
         console.log('Enhanced Cesium viewer created and positioned');
 
       } catch (err) {
         console.error('Failed to create Cesium viewer:', err);
         setError(`Failed to initialize map: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        setIsLoading(false);
       }
     };
 
@@ -324,12 +288,12 @@ const SimpleCesiumViewer: React.FC<CesiumMapProps> = ({
 
   // Update models when models prop changes
   useEffect(() => {
-    if (viewerRef.current) {
+    if (viewerRef.current && !isLoading) {
       import('cesium').then((Cesium) => {
         loadModels(Cesium);
       });
     }
-  }, [models, loadModels]);
+  }, [models, loadModels, isLoading]);
 
   if (error) {
     return (
@@ -349,6 +313,18 @@ const SimpleCesiumViewer: React.FC<CesiumMapProps> = ({
     );
   }
 
+  if (isLoading) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-blue-50">
+        <div className="text-center p-8">
+          <div className="animate-spin text-blue-500 mb-4 text-4xl">🌍</div>
+          <p className="text-blue-700 font-medium">Loading 3D Map...</p>
+          <p className="text-blue-600 text-sm mt-1">Initializing WebGL and Cesium viewer</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div 
       ref={cesiumContainerRef}
@@ -360,7 +336,15 @@ const SimpleCesiumViewer: React.FC<CesiumMapProps> = ({
 
 // Use dynamic import to avoid SSR issues
 const CesiumMapComponent = dynamic(() => Promise.resolve(SimpleCesiumViewer), {
-  ssr: false
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full flex items-center justify-center bg-gray-100">
+      <div className="text-center">
+        <div className="animate-pulse text-4xl mb-4">🗺️</div>
+        <p className="text-gray-600">Loading Map Component...</p>
+      </div>
+    </div>
+  ),
 });
 
 export default CesiumMapComponent;
