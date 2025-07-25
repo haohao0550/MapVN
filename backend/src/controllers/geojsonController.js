@@ -2,14 +2,23 @@ const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
 
+const testConnection = async () => {
+  try {
+    await prisma.$connect();
+    console.log('Database connected successfully');
+  } catch (error) {
+    console.error('Database connection failed:', error);
+  }
+};
+
+testConnection();
+
 const getGeoJsons = async (req, res) => {
   try {
     const { page = 1, limit = 10, type, search } = req.query;
     const skip = (page - 1) * limit;
 
     const where = {
-      isActive: true,
-      ...(type && { type }),
       ...(search && {
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
@@ -25,9 +34,9 @@ const getGeoJsons = async (req, res) => {
         take: parseInt(limit),
         include: {
           user: {
-            select: { id: true, name: true, email: true }
+            select: { id: true, username: true, email: true }
           },
-          category: {
+          categoryRel: {
             select: { id: true, name: true, color: true, icon: true }
           }
         },
@@ -67,7 +76,7 @@ const getGeoJson = async (req, res) => {
         user: {
           select: { id: true, name: true, email: true }
         },
-        category: {
+        categoryRel: {
           select: { id: true, name: true, color: true, icon: true }
         }
       }
@@ -118,7 +127,7 @@ const createGeoJson = async (req, res) => {
         user: {
           select: { id: true, name: true, email: true }
         },
-        category: {
+        categoryRel: {
           select: { id: true, name: true, color: true, icon: true }
         }
       }
@@ -169,7 +178,7 @@ const updateGeoJson = async (req, res) => {
         user: {
           select: { id: true, name: true, email: true }
         },
-        category: {
+        categoryRel: {
           select: { id: true, name: true, color: true, icon: true }
         }
       }

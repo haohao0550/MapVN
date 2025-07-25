@@ -8,7 +8,7 @@ const getModels = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const where = {
-      isActive: true,
+      active: true,
       ...(category && { categoryId: category }),
       ...(search && {
         OR: [
@@ -25,9 +25,9 @@ const getModels = async (req, res) => {
         take: parseInt(limit),
         include: {
           user: {
-            select: { id: true, name: true, email: true }
+            select: { id: true, username: true, email: true }
           },
-          category: {
+          categoryRel: {
             select: { id: true, name: true, color: true, icon: true }
           }
         },

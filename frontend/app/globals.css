@@ -90,3 +90,24 @@
   width: 100% !important;
   height: 100% !important;
 }
+
+/* Legend styles */
+.cesium-legend {
+  transition: all 0.3s ease;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.cesium-legend::-webkit-scrollbar {
+  width: 6px;
+}
+
+.cesium-legend::-webkit-scrollbar-track {
+  background: rgba(240, 240, 240, 0.8);
+  border-radius: 3px;
+}
+
+.cesium-legend::-webkit-scrollbar-thumb {
+  background-color: rgba(100, 100, 100, 0.5);
+  border-radius: 3px;
+}

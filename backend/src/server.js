@@ -51,6 +51,16 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Root route: redirect to health check
+app.get('/', (req, res) => {
+  res.redirect('/health');
+});
+
+// Favicon handler: trả về 204 để tránh lỗi Not Found
+app.get('/favicon.ico', (req, res) => {
+  res.sendStatus(204);
+});
+
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
