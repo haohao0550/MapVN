@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState, useCallback, useEffect } from 'react';
-import CesiumMap, { CameraPosition } from '@/components/CesiumMap';
-import GLBUpload from '@/components/GLBUpload';
-import AuthPage from '@/components/AuthPage';
+import CesiumMap, { CameraPosition } from '@/components/map/CesiumMap';
+import GLBUpload from '@/components/features/GLBUpload';
+import AuthPage from '@/components/features/AuthPage';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';

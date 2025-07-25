@@ -164,16 +164,6 @@ const GLBUpload: React.FC<GLBUploadProps> = ({ onModelUploaded, cameraPosition }
               <span>{selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)</span>
             </div>
           )}
-
-          {cameraPosition && (
-            <div className="text-sm text-gray-600 bg-gray-50 p-3 rounded">
-              <p><strong>Current Camera Position:</strong></p>
-              <p>Longitude: {cameraPosition.longitude.toFixed(6)}</p>
-              <p>Latitude: {cameraPosition.latitude.toFixed(6)}</p>
-              <p>Height: {cameraPosition.height.toFixed(2)}m</p>
-              <p className="text-green-600 mt-2">Model will be placed 5m below camera</p>
-            </div>
-          )}
         </div>
       </Card>
 
