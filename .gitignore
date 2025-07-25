@@ -1,3 +1,6 @@
+# wwwroot directory
+wwwroot/
+
 # Dependencies
 node_modules/
 npm-debug.log*
