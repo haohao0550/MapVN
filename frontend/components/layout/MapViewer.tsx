@@ -4,10 +4,12 @@ import React, { useState, useCallback, useEffect } from 'react';
 import CesiumMap, { CameraPosition } from '@/components/map/CesiumMap';
 import GLBUpload from '@/components/features/GLBUpload';
 import AuthPage from '@/components/features/AuthPage';
+import CategoryManager from '@/components/features/CategoryManager';
+import GeoJSONViewer from '@/components/features/GeoJSONViewer';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { MapPin, Upload, List, Settings, LogOut, User, Navigation, Edit, Eye, Trash2 } from 'lucide-react';
+import { MapPin, Upload, List, Settings, LogOut, User, Navigation, Edit, Eye, Trash2, Layers, FolderOpen, Tags, Package } from 'lucide-react';
 
 interface Model {
   id: string;
@@ -43,6 +45,8 @@ const MapViewer: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [models, setModels] = useState<Model[]>([]);
+  const [geojsons, setGeojsons] = useState<any[]>([]);
+  const [selectedRegion, setSelectedRegion] = useState<any | null>(null);
   const [cameraPosition, setCameraPosition] = useState<CameraPosition | null>(null);
   const [selectedModel, setSelectedModel] = useState<Model | null>(null);
   const [loading, setLoading] = useState(false);
@@ -235,6 +239,37 @@ const MapViewer: React.FC = () => {
     }
   }, [authToken]);
 
+  // Handle GeoJSON selection
+  const handleGeoJSONSelect = useCallback((geoJsonData: any, file: any) => {
+    setGeojsons(prev => {
+      const existing = prev.find(g => g.name === file.displayName);
+      if (existing) return prev;
+      
+      return [...prev, {
+        name: file.displayName,
+        type: file.type,
+        color: file.color,
+        data: geoJsonData
+      }];
+    });
+  }, []);
+
+  // Handle GeoJSON toggle
+  const handleGeoJSONToggle = useCallback((file: any, visible: boolean) => {
+    if (visible) {
+      // Keep in geojsons array
+    } else {
+      // Remove from geojsons array
+      setGeojsons(prev => prev.filter(g => g.name !== file.displayName));
+    }
+  }, []);
+
+  // Handle region click
+  const handleRegionClick = useCallback((regionInfo: any) => {
+    setSelectedRegion(regionInfo);
+    console.log('Region clicked:', regionInfo);
+  }, []);
+
   // Load models when user authenticates
   useEffect(() => {
     if (user && authToken) {
@@ -290,20 +325,27 @@ const MapViewer: React.FC = () => {
         </header>      {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Sidebar */}
-        <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-full overflow-hidden">
-          <Tabs defaultValue="upload" className="flex-1 flex flex-col min-h-0">
-            <TabsList className="grid w-full grid-cols-2 flex-shrink-0">
-              <TabsTrigger value="upload" className="flex items-center gap-2">
+        <div className="w-96 bg-white border-r border-gray-200 flex flex-col h-full overflow-hidden">
+          <Tabs defaultValue="upload-model" className="flex-1 flex flex-col min-h-0">
+            <TabsList className="grid w-full grid-cols-5 flex-shrink-0">
+              <TabsTrigger value="upload-model" className="flex items-center justify-center p-2" title="Upload Model">
                 <Upload className="w-4 h-4" />
-                Upload
               </TabsTrigger>
-              <TabsTrigger value="models" className="flex items-center gap-2">
-                <List className="w-4 h-4" />
-                Models ({models.length})
+              <TabsTrigger value="models" className="flex items-center justify-center p-2" title={`Models (${models.length})`}>
+                <Layers className="w-4 h-4" />
+              </TabsTrigger>
+              <TabsTrigger value="upload-geojson" className="flex items-center justify-center p-2" title="Upload GeoJSON">
+                <FolderOpen className="w-4 h-4" />
+              </TabsTrigger>
+              <TabsTrigger value="geojson" className="flex items-center justify-center p-2" title="GeoJSON">
+                <MapPin className="w-4 h-4" />
+              </TabsTrigger>
+              <TabsTrigger value="category" className="flex items-center justify-center p-2" title="Category">
+                <Tags className="w-4 h-4" />
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="upload" className="flex-1 p-4 overflow-y-auto min-h-0">
+            <TabsContent value="upload-model" className="flex-1 p-4 overflow-y-auto min-h-0">
               <GLBUpload
                 onModelUploaded={handleModelUploaded}
                 cameraPosition={cameraPosition || undefined}
@@ -400,6 +442,25 @@ const MapViewer: React.FC = () => {
                 )}
               </div>
             </TabsContent>
+
+            <TabsContent value="upload-geojson" className="flex-1 p-4 overflow-y-auto min-h-0">
+              <div className="text-center text-gray-500 py-8">
+                <FolderOpen className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                <p className="text-lg font-medium">Upload GeoJSON</p>
+                <p className="text-sm">Feature coming soon - Upload GeoJSON files for map visualization</p>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="geojson" className="flex-1 p-4 overflow-y-auto min-h-0">
+              <GeoJSONViewer 
+                onGeoJSONSelect={handleGeoJSONSelect}
+                onGeoJSONToggle={handleGeoJSONToggle}
+              />
+            </TabsContent>
+
+            <TabsContent value="category" className="flex-1 p-4 overflow-y-auto min-h-0">
+              <CategoryManager authToken={authToken || ''} />
+            </TabsContent>
           </Tabs>
         </div>
 
@@ -408,8 +469,10 @@ const MapViewer: React.FC = () => {
           <CesiumMap
             className="w-full h-full"
             models={models}
+            geojsons={geojsons}
             onCameraMove={handleCameraMove}
             onModelClick={handleModelClick}
+            onRegionClick={handleRegionClick}
             flyToModel={flyToModelId}
           />
 
@@ -469,6 +532,53 @@ const MapViewer: React.FC = () => {
                           >
                             {tag}
                           </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {/* Region Details Overlay */}
+          {selectedRegion && !selectedModel && (
+            <div className="absolute top-4 right-4 w-80">
+              <Card className="p-4 bg-white/95 backdrop-blur-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                    <MapPin className="w-4 h-4" />
+                    {selectedRegion.name}
+                  </h3>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setSelectedRegion(null)}
+                  >
+                    ×
+                  </Button>
+                </div>
+                
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="w-4 h-4 rounded border"
+                      style={{ backgroundColor: selectedRegion.color }}
+                    />
+                    <span className="font-medium">
+                      {selectedRegion.type === 'province' ? 'Tỉnh Thành' : 'Phường Xã'}
+                    </span>
+                  </div>
+                  
+                  {selectedRegion.data && Object.keys(selectedRegion.data).length > 0 && (
+                    <div className="pt-2 border-t border-gray-200">
+                      <h4 className="font-medium mb-2 text-xs">Thông tin chi tiết:</h4>
+                      <div className="space-y-1 text-xs">
+                        {Object.entries(selectedRegion.data).map(([key, value]) => (
+                          <div key={key} className="flex justify-between">
+                            <span className="text-gray-500 capitalize">{key}:</span>
+                            <span className="font-medium">{String(value)}</span>
+                          </div>
                         ))}
                       </div>
                     </div>

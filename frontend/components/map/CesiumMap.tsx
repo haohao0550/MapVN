@@ -16,8 +16,67 @@ interface CesiumMapProps {
   onModelClick?: (model: any) => void;
   onMapClick?: (position: { latitude: number; longitude: number; altitude: number }) => void;
   onCameraMove?: (position: CameraPosition) => void;
+  onRegionClick?: (regionInfo: any) => void; // New prop for region clicks
   flyToModel?: string; // Model ID to fly to
 }
+
+// Helper function to validate and clean GeoJSON data
+const validateAndCleanGeoJSON = (geoJsonData: any) => {
+  if (!geoJsonData || !geoJsonData.features) {
+    return geoJsonData;
+  }
+
+  const cleanedFeatures = geoJsonData.features.filter((feature: any) => {
+    if (!feature.geometry || !feature.geometry.coordinates) {
+      return false;
+    }
+
+    // Check for valid coordinates
+    const validateCoordinates = (coords: any): boolean => {
+      if (!Array.isArray(coords)) return false;
+      
+      if (typeof coords[0] === 'number' && typeof coords[1] === 'number') {
+        // Single coordinate pair
+        return !isNaN(coords[0]) && !isNaN(coords[1]) && 
+               Math.abs(coords[0]) <= 180 && Math.abs(coords[1]) <= 90;
+      }
+      
+      // Array of coordinates
+      return coords.every((coord: any) => validateCoordinates(coord));
+    };
+
+    // Validate geometry type
+    const geometry = feature.geometry;
+    switch (geometry.type) {
+      case 'Point':
+        return validateCoordinates(geometry.coordinates);
+      case 'LineString':
+        return geometry.coordinates.length >= 2 && validateCoordinates(geometry.coordinates);
+      case 'Polygon':
+        return geometry.coordinates.every((ring: any) => 
+          ring.length >= 4 && validateCoordinates(ring) &&
+          // Check that first and last points are the same (closed ring)
+          ring[0][0] === ring[ring.length - 1][0] && 
+          ring[0][1] === ring[ring.length - 1][1]
+        );
+      case 'MultiPolygon':
+        return geometry.coordinates.every((polygon: any) =>
+          polygon.every((ring: any) => 
+            ring.length >= 4 && validateCoordinates(ring) &&
+            ring[0][0] === ring[ring.length - 1][0] && 
+            ring[0][1] === ring[ring.length - 1][1]
+          )
+        );
+      default:
+        return true;
+    }
+  });
+
+  return {
+    ...geoJsonData,
+    features: cleanedFeatures
+  };
+};
 
 // ===== SIMPLE CESIUM VIEWER =====
 const SimpleCesiumViewer: React.FC<CesiumMapProps> = ({
@@ -26,12 +85,14 @@ const SimpleCesiumViewer: React.FC<CesiumMapProps> = ({
   onModelClick,
   onMapClick,
   onCameraMove,
+  onRegionClick,
   flyToModel
 }) => {
   const cesiumContainerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<any>(null);
   const [error, setError] = useState<string | null>(null);
   const modelsRef = useRef<any[]>([]);
+  const geoJsonDataSourcesRef = useRef<any[]>([]);
 
   // Debug: Log models prop changes
   useEffect(() => {
@@ -76,6 +137,72 @@ const SimpleCesiumViewer: React.FC<CesiumMapProps> = ({
       }
     }
   }, [models]);
+
+  const loadGeoJSONs = useCallback(async (Cesium: any) => {
+    if (!viewerRef.current || !geojsons.length) {
+      console.log('No viewer or GeoJSONs to load');
+      return;
+    }
+
+    console.log(`Loading ${geojsons.length} GeoJSON layers...`);
+
+    // Clear existing GeoJSON data sources
+    geoJsonDataSourcesRef.current.forEach(dataSource => {
+      if (dataSource && !dataSource.isDestroyed) {
+        viewerRef.current.dataSources.remove(dataSource);
+      }
+    });
+    geoJsonDataSourcesRef.current = [];
+
+    // Load new GeoJSON data
+    for (const geoJsonItem of geojsons) {
+      try {
+        console.log(`Loading GeoJSON: ${geoJsonItem.name}`);
+        
+        // Validate and clean GeoJSON data
+        const cleanedData = validateAndCleanGeoJSON(geoJsonItem.data);
+        
+        const dataSource = await Cesium.GeoJsonDataSource.load(cleanedData, {
+          name: geoJsonItem.name,
+          stroke: Cesium.Color.fromCssColorString(geoJsonItem.color || '#3B82F6'),
+          fill: Cesium.Color.fromCssColorString(geoJsonItem.color || '#3B82F6').withAlpha(0.3),
+          strokeWidth: 2,
+          clampToGround: true
+        });
+
+        // Add region information to entities for click handling
+        const entities = dataSource.entities.values;
+        for (const entity of entities) {
+          entity.properties = entity.properties || new Cesium.PropertyBag();
+          entity.properties.regionType = geoJsonItem.type;
+          entity.properties.regionName = geoJsonItem.name;
+          entity.properties.regionColor = geoJsonItem.color;
+          
+          // Get region data from GeoJSON properties
+          if (entity.properties && entity.properties.propertyNames) {
+            const props: Record<string, any> = {};
+            entity.properties.propertyNames.forEach((propName: string) => {
+              props[propName] = entity.properties[propName];
+            });
+            entity.properties.regionData = props;
+          }
+        }
+
+        viewerRef.current.dataSources.add(dataSource);
+        geoJsonDataSourcesRef.current.push(dataSource);
+        
+        console.log(`GeoJSON loaded successfully: ${geoJsonItem.name}`);
+      } catch (error) {
+        console.error(`Error loading GeoJSON ${geoJsonItem.name}:`, error);
+      }
+    }
+  }, [geojsons]);
+
+  // Debug: Log geojsons prop changes
+  useEffect(() => {
+    console.log('CesiumMap geojsons prop changed:', geojsons);
+    console.log('GeoJSONs count:', geojsons.length);
+  }, [geojsons]);
 
   // Handle flyToModel prop changes
   useEffect(() => {
@@ -264,19 +391,38 @@ const SimpleCesiumViewer: React.FC<CesiumMapProps> = ({
           });
         }
 
-        // Handle model clicks
-        if (onModelClick) {
+        // Handle model clicks and region clicks
+        if (onModelClick || onRegionClick) {
           viewerRef.current.cesiumWidget.canvas.addEventListener('click', (event: MouseEvent) => {
             const pickedObject = viewerRef.current.scene.pick(new Cesium.Cartesian2(event.clientX, event.clientY));
             
             if (Cesium.defined(pickedObject)) {
-              // Find associated model data
+              // Check if it's a model
               const clickedModel = modelsRef.current.find(model => 
                 model.primitive === pickedObject.primitive
               );
               
-              if (clickedModel) {
+              if (clickedModel && onModelClick) {
                 onModelClick(clickedModel.modelData);
+                return;
+              }
+
+              // Check if it's a GeoJSON entity (region)
+              if (pickedObject.id && pickedObject.id.properties && onRegionClick) {
+                const entity = pickedObject.id;
+                const properties = entity.properties;
+                
+                if (properties.regionType && properties.regionName) {
+                  const regionInfo = {
+                    type: properties.regionType.getValue(),
+                    name: properties.regionName.getValue(),
+                    color: properties.regionColor.getValue(),
+                    data: properties.regionData ? properties.regionData.getValue() : {},
+                    entity: entity
+                  };
+                  
+                  onRegionClick(regionInfo);
+                }
               }
             }
           });
@@ -299,8 +445,9 @@ const SimpleCesiumViewer: React.FC<CesiumMapProps> = ({
           });
         }
 
-        // Load models
+        // Load models and GeoJSONs
         await loadModels(Cesium);
+        await loadGeoJSONs(Cesium);
 
         console.log('Enhanced Cesium viewer created and positioned');
 
@@ -320,7 +467,7 @@ const SimpleCesiumViewer: React.FC<CesiumMapProps> = ({
         viewerRef.current.destroy();
       }
     };
-  }, [onCameraMove, onMapClick, onModelClick, getCameraPosition, loadModels]);
+  }, [onCameraMove, onMapClick, onModelClick, onRegionClick, getCameraPosition, loadModels, loadGeoJSONs]);
 
   // Update models when models prop changes
   useEffect(() => {
@@ -330,6 +477,15 @@ const SimpleCesiumViewer: React.FC<CesiumMapProps> = ({
       });
     }
   }, [models, loadModels]);
+
+  // Update GeoJSONs when geojsons prop changes
+  useEffect(() => {
+    if (viewerRef.current) {
+      import('cesium').then((Cesium) => {
+        loadGeoJSONs(Cesium);
+      });
+    }
+  }, [geojsons, loadGeoJSONs]);
 
   if (error) {
     return (

@@ -1,9 +1,15 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Upload, FileText, Loader2, Save, Settings } from 'lucide-react';
+
+interface Category {
+  id: string;
+  name: string;
+  description?: string;
+}
 
 interface GLBUploadProps {
   onModelUploaded?: (model: any) => void;
@@ -29,6 +35,8 @@ interface ModelProperties {
 const GLBUpload: React.FC<GLBUploadProps> = ({ onModelUploaded, cameraPosition }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loadingCategories, setLoadingCategories] = useState(false);
   const [modelProperties, setModelProperties] = useState<ModelProperties>({
     name: '',
     description: '',
@@ -40,6 +48,36 @@ const GLBUpload: React.FC<GLBUploadProps> = ({ onModelUploaded, cameraPosition }
     tags: [],
     isPublic: true
   });
+
+  // Load categories from API
+  const loadCategories = useCallback(async () => {
+    setLoadingCategories(true);
+    try {
+      const token = localStorage.getItem('authToken');
+      const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+      const response = await fetch(`${BACKEND_URL}/api/categories`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const result = await response.json();
+      
+      if (result.success) {
+        setCategories(result.data);
+      } else {
+        console.error('Failed to load categories:', result.message);
+      }
+    } catch (error) {
+      console.error('Error loading categories:', error);
+    } finally {
+      setLoadingCategories(false);
+    }
+  }, []);
+
+  // Load categories on component mount
+  useEffect(() => {
+    loadCategories();
+  }, [loadCategories]);
 
   const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -192,13 +230,22 @@ const GLBUpload: React.FC<GLBUploadProps> = ({ onModelUploaded, cameraPosition }
             <label className="block text-sm font-medium mb-2">
               Category
             </label>
-            <input
-              type="text"
+            <select
               value={modelProperties.category}
               onChange={(e) => handlePropertyChange('category', e.target.value)}
               className="w-full p-2 border border-gray-300 rounded-md"
-              placeholder="e.g., Buildings, Vehicles, etc."
-            />
+              disabled={loadingCategories}
+            >
+              <option value="">-- Select Category --</option>
+              {categories.map(category => (
+                <option key={category.id} value={category.name}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+            {loadingCategories && (
+              <p className="text-xs text-gray-500 mt-1">Loading categories...</p>
+            )}
           </div>
 
           <div className="md:col-span-2">
