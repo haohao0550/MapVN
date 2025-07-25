@@ -89,6 +89,7 @@ cp .env.example .env
 # Edit .env với database credentials
 npx prisma generate
 npx prisma migrate deploy
+npx prisma db push # optional
 npm run db:seed
 npm run dev
 ```

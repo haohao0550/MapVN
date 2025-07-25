@@ -28,6 +28,12 @@ const nextConfig = {
   images: {
     domains: ['localhost'],
   },
+  // onDemandEntries: {
+  //   websocketPort: 0, // Tắt WebSocket port
+  // },
+  // experimental: {
+  //   reactRefresh: false,
+  // },
 };
 
 module.exports = nextConfig;
