@@ -159,70 +159,6 @@ const sanitizeGeoJsonRobust = (geojson: any) => {
     };
 };
 
-// Convert to points at centroids
-const convertToPoints = (geojson: any) => {
-    if (!geojson || !geojson.features) return geojson;
-    
-    const pointFeatures = geojson.features.map((feature: any, index: number) => {
-        if (!feature || !feature.geometry) return null;
-        
-        let centroid = [105.8, 15.9];
-        
-        try {
-            const geom = feature.geometry;
-            if (geom.type === 'Polygon' && geom.coordinates && geom.coordinates[0]) {
-                const ring = geom.coordinates[0];
-                if (ring.length > 0) {
-                    const validCoords = ring.filter((coord: any) => 
-                        Array.isArray(coord) && coord.length >= 2 && 
-                        !isNaN(coord[0]) && !isNaN(coord[1])
-                    );
-                    
-                    if (validCoords.length > 0) {
-                        const avgLon = validCoords.reduce((sum: number, coord: any) => sum + coord[0], 0) / validCoords.length;
-                        const avgLat = validCoords.reduce((sum: number, coord: any) => sum + coord[1], 0) / validCoords.length;
-                        centroid = [avgLon, avgLat];
-                    }
-                }
-            } else if (geom.type === 'MultiPolygon' && geom.coordinates && geom.coordinates[0] && geom.coordinates[0][0]) {
-                const ring = geom.coordinates[0][0];
-                if (ring.length > 0) {
-                    const validCoords = ring.filter((coord: any) => 
-                        Array.isArray(coord) && coord.length >= 2 && 
-                        !isNaN(coord[0]) && !isNaN(coord[1])
-                    );
-                    
-                    if (validCoords.length > 0) {
-                        const avgLon = validCoords.reduce((sum: number, coord: any) => sum + coord[0], 0) / validCoords.length;
-                        const avgLat = validCoords.reduce((sum: number, coord: any) => sum + coord[1], 0) / validCoords.length;
-                        centroid = [avgLon, avgLat];
-                    }
-                }
-            }
-        } catch (error) {
-            // Use default centroid
-        }
-        
-        return {
-            type: 'Feature',
-            properties: {
-                ...feature.properties,
-                name: feature.properties?.name || feature.properties?.NAME || `Province ${index + 1}`,
-                originalType: feature.geometry?.type || 'Unknown'
-            },
-            geometry: {
-                type: 'Point',
-                coordinates: centroid
-            }
-        };
-    }).filter(Boolean);
-    
-    return {
-        type: 'FeatureCollection',
-        features: pointFeatures
-    };
-};
-
 // Province Info Panel Component - Fixed at bottom left
 const ProvinceInfoPanel: React.FC<{
     info: ProvinceInfo | null;
@@ -314,7 +250,7 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(true);
     const [isViewerReady, setIsViewerReady] = useState(false);
-    const [displayMode, setDisplayMode] = useState<'polygon' | 'point'>('polygon');
+    const [viewMode, setViewMode] = useState<'TinhThanh' | 'XaPhuong'>('TinhThanh');
     const [provinceInfo, setProvinceInfo] = useState<ProvinceInfo | null>(null);
     
     const [cesiumContainerNode, setCesiumContainerNode] = useState<HTMLDivElement | null>(null);
@@ -405,13 +341,12 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
         };
     }, [cesiumContainerNode]);
 
-    // Load GeoJSON data
+    // Load GeoJSON data based on view mode
     useEffect(() => {
         if (!isViewerReady || !viewerRef.current || !cesiumRef.current) return;
 
         const viewer = viewerRef.current;
         const Cesium = cesiumRef.current;
-        const vnGeo = Array.isArray(geojsons) ? geojsons.find(g => g.name === 'Vietnam Boundary') : null;
 
         // Remove existing data
         if (geoJsonDataSourceRef.current) {
@@ -425,34 +360,33 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
             clickHandlerRef.current = null;
         }
 
-        if (!vnGeo || !vnGeo.data) return;
+        // Close existing popup
+        setProvinceInfo(null);
 
-        console.log('Geojson data: ', vnGeo.data);
+        if (viewMode === 'TinhThanh') {
+            loadTinhThanhData();
+        } else if (viewMode === 'XaPhuong') {
+            loadXaPhuongData();
+        }
 
-        const loadGeoJson = async () => {
+        async function loadTinhThanhData() {
+            const ttGeo = Array.isArray(geojsons) ? geojsons.find(g => g.name === 'Viet_Nam') : null;
+            
+            if (!ttGeo || !ttGeo.data) return;
+
+            console.log('TinhThanh GeoJSON data: ', ttGeo.data);
+
             try {
                 setIsLoading(true);
 
-                let processedData;
-                let loadOptions;
-
-                if (displayMode === 'point') {
-                    processedData = convertToPoints(vnGeo.data);
-                    loadOptions = {
-                        markerSize: 24,
-                        markerColor: Cesium.Color.YELLOW,
-                        clampToGround: true
-                    };
-                } else {
-                    processedData = sanitizeGeoJsonRobust(vnGeo.data);
-                    loadOptions = {
-                        stroke: Cesium.Color.YELLOW,
-                        fill: Cesium.Color.YELLOW.withAlpha(0.15),
-                        strokeWidth: 2,
-                        clampToGround: false,
-                        extrudedHeight: 0
-                    };
-                }
+                const processedData = sanitizeGeoJsonRobust(ttGeo.data);
+                const loadOptions = {
+                    stroke: Cesium.Color.YELLOW,
+                    fill: Cesium.Color.YELLOW.withAlpha(0.15),
+                    strokeWidth: 2,
+                    clampToGround: false,
+                    extrudedHeight: 0
+                };
 
                 if (!processedData.features || processedData.features.length === 0) {
                     throw new Error('No valid features found');
@@ -464,150 +398,294 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
                     viewer.dataSources.add(dataSource);
                     geoJsonDataSourceRef.current = dataSource;
                     
-                    // Additional polygon styling
-                    if (displayMode === 'polygon') {
-                        const entities = dataSource.entities.values;
-                        const provinceColors = [
-                            '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8',
-                            '#F7DC6F', '#BB8FCE', '#85C1E9', '#F8C471', '#82E0AA', '#F1948A', '#AED6F1',
-                            '#A9DFBF', '#F9E79F', '#D7BDE2', '#A3E4D7', '#FAD7A0', '#D5A6BD', '#A9CCE3',
-                            '#ABEBC6', '#F5B7B1', '#D6EAF8', '#A2D9CE', '#FCF3CF', '#E8DAEF', '#B2DFDB',
-                            '#FFCDD2', '#E1F5FE', '#F3E5F5', '#E8F5E8', '#FFF3E0', '#F3E5F5'
-                        ];
+                    // Province styling
+                    const entities = dataSource.entities.values;
+                    const provinceColors = [
+                        '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8',
+                        '#F7DC6F', '#BB8FCE', '#85C1E9', '#F8C471', '#82E0AA', '#F1948A', '#AED6F1',
+                        '#A9DFBF', '#F9E79F', '#D7BDE2', '#A3E4D7', '#FAD7A0', '#D5A6BD', '#A9CCE3',
+                        '#ABEBC6', '#F5B7B1', '#D6EAF8', '#A2D9CE', '#FCF3CF', '#E8DAEF', '#B2DFDB',
+                        '#FFCDD2', '#E1F5FE', '#F3E5F5', '#E8F5E8', '#FFF3E0', '#F3E5F5'
+                    ];
 
-                        for (let i = 0; i < entities.length; i++) {
-                            const entity = entities[i];
-                            if (entity.polygon) {
-                                const colorHex = provinceColors[i % provinceColors.length];
-                                const fillColor = Cesium.Color.fromCssColorString(colorHex).withAlpha(0.8);
-                                const outlineColor = Cesium.Color.fromCssColorString(colorHex).darken(0.4, new Cesium.Color());
+                    for (let i = 0; i < entities.length; i++) {
+                        const entity = entities[i];
+                        if (entity.polygon) {
+                            const colorHex = provinceColors[i % provinceColors.length];
+                            const fillColor = Cesium.Color.fromCssColorString(colorHex).withAlpha(0.8);
+                            const outlineColor = Cesium.Color.fromCssColorString(colorHex).darken(0.4, new Cesium.Color());
 
-                                entity.polygon.material = fillColor;
-                                entity.polygon.outline = true;
-                                entity.polygon.outlineColor = outlineColor;
-                                entity.polygon.height = 0;
-                                entity.polygon.extrudedHeight = undefined;
-                            }
+                            entity.polygon.material = fillColor;
+                            entity.polygon.outline = true;
+                            entity.polygon.outlineColor = outlineColor;
+                            entity.polygon.height = 0;
+                            entity.polygon.extrudedHeight = undefined;
                         }
                     }
                     
-                    // Set up click handler
-                    const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
-                    clickHandlerRef.current = handler;
+                    setupTinhThanhClickHandler();
                     
-                    handler.setInputAction((event: any) => {
-                        const pickedObject = viewer.scene.pick(event.position);
-                        
-                        if (Cesium.defined(pickedObject) && pickedObject.id) {
-                            const entity = pickedObject.id;
-                            
-                            // Close existing popup
-                            setProvinceInfo(null);
-                            
-                            // Get properties
-                            const properties = entity.properties;
-                            // console.log("Property: ", properties);
-                            let propsObj: { [key: string]: any } = {};
-
-                            if (properties && properties.propertyNames) {
-                                properties.propertyNames.forEach((key: string) => {
-                                    // Truy cập property bằng cách thêm underscore prefix
-                                    const propertyKey = `_${key}`;
-                                    const property = properties[propertyKey];
-                                    
-                                    if (property && property._value !== undefined) {
-                                        // Lấy giá trị từ _value của ConstantProperty
-                                        propsObj[key] = property._value;
-                                    } else if (property && property.value !== undefined) {
-                                        // Fallback cho trường hợp không có _value
-                                        propsObj[key] = property.value;
-                                    } else {
-                                        // Fallback cuối cùng
-                                        propsObj[key] = property;
-                                    }
-                                });
-                            }
-
-                            console.log("Property: ", propsObj)
-                            
-                            // Get province name
-                            let provinceName = propsObj.ten_tinh || 'Unknown Province';
-                            
-                            // Get coordinates
-                            let latitude = propsObj.latitude ?? propsObj.lat ?? undefined;
-                            let longitude = propsObj.longitude ?? propsObj.lon ?? undefined;
-                            let altitude = propsObj.altitude ?? propsObj.height ?? 0;
-                            
-                            // If coordinates not available, compute from geometry
-                            if (typeof latitude !== 'number' || typeof longitude !== 'number') {
-                                if (displayMode === 'polygon' && entity.polygon && entity.polygon.hierarchy) {
-                                    const hierarchy = entity.polygon.hierarchy.getValue ? 
-                                        entity.polygon.hierarchy.getValue() : entity.polygon.hierarchy;
-                                    
-                                    if (hierarchy && hierarchy.positions && hierarchy.positions.length > 0) {
-                                        const cartographics = hierarchy.positions.map((pos: any) =>
-                                            Cesium.Cartographic.fromCartesian(pos)
-                                        );
-                                        longitude = cartographics.reduce((sum: number, c: any) => 
-                                            sum + Cesium.Math.toDegrees(c.longitude), 0) / cartographics.length;
-                                        latitude = cartographics.reduce((sum: number, c: any) => 
-                                            sum + Cesium.Math.toDegrees(c.latitude), 0) / cartographics.length;
-                                        altitude = cartographics.reduce((sum: number, c: any) => 
-                                            sum + c.height, 0) / cartographics.length;
-                                    }
-                                } else if (displayMode === 'point' && entity.position) {
-                                    const position = entity.position.getValue ? 
-                                        entity.position.getValue() : entity.position;
-                                    const cartographic = Cesium.Cartographic.fromCartesian(position);
-                                    longitude = Cesium.Math.toDegrees(cartographic.longitude);
-                                    latitude = Cesium.Math.toDegrees(cartographic.latitude);
-                                    altitude = cartographic.height;
-                                }
-                            }
-                            
-                            // Create info object
-                            if (typeof latitude === 'number' && typeof longitude === 'number') {
-                                const info: ProvinceInfo = {
-                                    name: provinceName,
-                                    latitude,
-                                    longitude,
-                                    altitude: altitude || 0,
-                                    properties: propsObj,
-                                    position: { x: 0, y: 0 } // Not needed for fixed panel
-                                };
-                                
-                                setProvinceInfo(info);
-                                
-                                // Also call the original onMapClick if provided
-                                if (onMapClick) {
-                                    onMapClick({ latitude, longitude, altitude: altitude || 0 });
-                                }
-                            }
-                        } else {
-                            // Clicked on empty space, close popup
-                            setProvinceInfo(null);
-                        }
-                    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+                    // Position camera over Vietnam
+                    viewer.camera.flyTo({
+                        destination: Cesium.Cartesian3.fromDegrees(105.8, 15.9, 1500000),
+                        duration: 2.0
+                    });
                     
                     setIsLoading(false);
                     setError(null);
                 }
 
             } catch (err: any) {
-                if (displayMode === 'polygon') {
-                    // Auto-fallback to point mode
-                    setDisplayMode('point');
-                    return;
-                }
-                
-                setError(`Failed to load map data: ${err.message}`);
+                setError(`Failed to load TinhThanh data: ${err.message}`);
                 setIsLoading(false);
             }
-        };
+        }
 
-        loadGeoJson();
+        async function loadXaPhuongData() {
+            const xpGeo = Array.isArray(geojsons) ? geojsons.find(g => g.name === 'Da_Nang') : null;
+            
+            if (!xpGeo || !xpGeo.data) return;
 
-    }, [isViewerReady, geojsons, displayMode]);
+            console.log('XaPhuong GeoJSON data: ', xpGeo.data);
+
+            try {
+                setIsLoading(true);
+
+                const processedData = sanitizeGeoJsonRobust(xpGeo.data);
+                const loadOptions = {
+                    stroke: Cesium.Color.ORANGE,
+                    fill: Cesium.Color.ORANGE.withAlpha(0.25),
+                    strokeWidth: 1.5,
+                    clampToGround: false,
+                    extrudedHeight: 0
+                };
+
+                if (!processedData.features || processedData.features.length === 0) {
+                    throw new Error('No valid ward/commune features found');
+                }
+
+                const dataSource = await Cesium.GeoJsonDataSource.load(processedData, loadOptions);
+                
+                if (viewer && !viewer.isDestroyed()) {
+                    viewer.dataSources.add(dataSource);
+                    geoJsonDataSourceRef.current = dataSource;
+                    
+                    // Ward/commune styling
+                    const entities = dataSource.entities.values;
+                    const wardColors = [
+                        '#FF8A80', '#FFB74D', '#81C784', '#64B5F6', '#BA68C8', '#4DB6AC', '#F06292',
+                        '#FFD54F', '#A1C181', '#90CAF9', '#CE93D8', '#80CBC4', '#FF8A65', '#FFF176',
+                        '#C5E1A5', '#B39DDB', '#80DEEA', '#FFCC02', '#DCEDC8', '#E1BEE7', '#B2DFDB',
+                        '#FFCDD2', '#F8BBD9', '#C8E6C9', '#BBDEFB', '#D1C4E9', '#B2EBF2', '#FFECB3',
+                        '#F3E5F5', '#E0F2F1', '#FCE4EC', '#E8F5E8', '#F3E5F5', '#E1F5FE'
+                    ];
+
+                    for (let i = 0; i < entities.length; i++) {
+                        const entity = entities[i];
+                        if (entity.polygon) {
+                            const colorHex = wardColors[i % wardColors.length];
+                            const fillColor = Cesium.Color.fromCssColorString(colorHex).withAlpha(0.7);
+                            const outlineColor = Cesium.Color.fromCssColorString(colorHex).darken(0.3, new Cesium.Color());
+
+                            entity.polygon.material = fillColor;
+                            entity.polygon.outline = true;
+                            entity.polygon.outlineColor = outlineColor;
+                            entity.polygon.height = 0;
+                            entity.polygon.extrudedHeight = undefined;
+                        }
+                    }
+                    
+                    setupXaPhuongClickHandler();
+                    
+                    // Focus camera on Da Nang area
+                    viewer.camera.flyTo({
+                        destination: Cesium.Cartesian3.fromDegrees(108.2022, 16.0471, 50000),
+                        duration: 2.0
+                    });
+                    
+                    setIsLoading(false);
+                    setError(null);
+                }
+
+            } catch (err: unknown) {
+                console.error('Error loading ward/commune data:', err);
+                const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+                setError(`Failed to load XaPhuong data: ${errorMessage}`);
+                setIsLoading(false);
+            }
+        }
+
+        function setupTinhThanhClickHandler() {
+            const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+            clickHandlerRef.current = handler;
+            
+            handler.setInputAction((event: any) => {
+                const pickedObject = viewer.scene.pick(event.position);
+                
+                if (Cesium.defined(pickedObject) && pickedObject.id) {
+                    const entity = pickedObject.id;
+                    
+                    // Close existing popup
+                    setProvinceInfo(null);
+                    
+                    // Get properties
+                    const properties = entity.properties;
+                    let propsObj: { [key: string]: any } = {};
+
+                    if (properties && properties.propertyNames) {
+                        properties.propertyNames.forEach((key: string) => {
+                            const propertyKey = `_${key}`;
+                            const property = properties[propertyKey];
+                            
+                            if (property && property._value !== undefined) {
+                                propsObj[key] = property._value;
+                            } else if (property && property.value !== undefined) {
+                                propsObj[key] = property.value;
+                            } else {
+                                propsObj[key] = property;
+                            }
+                        });
+                    }
+
+                    console.log("TinhThanh Properties: ", propsObj);
+                    
+                    // Get province name
+                    let provinceName = propsObj.ten_tinh || 'Unknown Province';
+                    
+                    // Get coordinates from polygon geometry
+                    let latitude: number, longitude: number, altitude = 0;
+                    
+                    if (entity.polygon && entity.polygon.hierarchy) {
+                        const hierarchy = entity.polygon.hierarchy.getValue ? 
+                            entity.polygon.hierarchy.getValue() : entity.polygon.hierarchy;
+                        
+                        if (hierarchy && hierarchy.positions && hierarchy.positions.length > 0) {
+                            const cartographics = hierarchy.positions.map((pos: any) =>
+                                Cesium.Cartographic.fromCartesian(pos)
+                            );
+                            longitude = cartographics.reduce((sum: number, c: any) => 
+                                sum + Cesium.Math.toDegrees(c.longitude), 0) / cartographics.length;
+                            latitude = cartographics.reduce((sum: number, c: any) => 
+                                sum + Cesium.Math.toDegrees(c.latitude), 0) / cartographics.length;
+                            altitude = cartographics.reduce((sum: number, c: any) => 
+                                sum + c.height, 0) / cartographics.length;
+                        }
+                    }
+                    
+                    // Create info object
+                    if (typeof latitude! === 'number' && typeof longitude! === 'number') {
+                        const info: ProvinceInfo = {
+                            name: provinceName,
+                            latitude: latitude!,
+                            longitude: longitude!,
+                            altitude: altitude || 0,
+                            properties: propsObj,
+                            position: { x: 0, y: 0 }
+                        };
+                        
+                        setProvinceInfo(info);
+                        
+                        if (onMapClick) {
+                            onMapClick({ latitude: latitude!, longitude: longitude!, altitude: altitude || 0 });
+                        }
+                    }
+                } else {
+                    setProvinceInfo(null);
+                }
+            }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+        }
+
+        function setupXaPhuongClickHandler() {
+            const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+            clickHandlerRef.current = handler;
+            
+            handler.setInputAction((event: any) => {
+                const pickedObject = viewer.scene.pick(event.position);
+                
+                if (Cesium.defined(pickedObject) && pickedObject.id) {
+                    const entity = pickedObject.id;
+                    
+                    // Close existing popup
+                    setProvinceInfo(null);
+                    
+                    // Get properties
+                    const properties = entity.properties;
+                    let propsObj: { [key: string]: any } = {};
+
+                    if (properties && properties.propertyNames) {
+                        properties.propertyNames.forEach((key: string) => {
+                            const propertyKey = `_${key}`;
+                            const property = properties[propertyKey];
+                            
+                            if (property && property._value !== undefined) {
+                                propsObj[key] = property._value;
+                            } else if (property && property.value !== undefined) {
+                                propsObj[key] = property.value;
+                            } else {
+                                propsObj[key] = property;
+                            }
+                        });
+                    }
+
+                    console.log("XaPhuong Properties: ", propsObj);
+                    
+                    // Get ward/commune name
+                    let wardName = (propsObj as any).ten_xa || (propsObj as any).name || (propsObj as any).NAME || 'Unknown Ward/Commune';
+                    
+                    // Get coordinates from polygon geometry
+                    let latitude: number, longitude: number, altitude = 0;
+                    
+                    if (entity.polygon && entity.polygon.hierarchy) {
+                        const hierarchy = entity.polygon.hierarchy.getValue ? 
+                            entity.polygon.hierarchy.getValue() : entity.polygon.hierarchy;
+                        
+                        if (hierarchy && hierarchy.positions && hierarchy.positions.length > 0) {
+                            const cartographics = hierarchy.positions.map((pos: any) =>
+                                Cesium.Cartographic.fromCartesian(pos)
+                            );
+                            longitude = cartographics.reduce((sum: number, c: any) => 
+                                sum + Cesium.Math.toDegrees(c.longitude), 0) / cartographics.length;
+                            latitude = cartographics.reduce((sum: number, c: any) => 
+                                sum + Cesium.Math.toDegrees(c.latitude), 0) / cartographics.length;
+                            altitude = cartographics.reduce((sum: number, c: any) => 
+                                sum + c.height, 0) / cartographics.length;
+                        }
+                    }
+                    
+                    // Create info object for ward/commune
+                    if (typeof latitude! === 'number' && typeof longitude! === 'number') {
+                        const info: ProvinceInfo = {
+                            name: `${wardName} (${(propsObj as any).loai || 'Ward/Commune'})`,
+                            latitude: latitude!,
+                            longitude: longitude!,
+                            altitude: altitude || 0,
+                            properties: {
+                                ...propsObj,
+                                type: (propsObj as any).loai || 'Ward/Commune',
+                                area_km2: (propsObj as any).dtich_km2 ? `${(propsObj as any).dtich_km2} km²` : 'N/A',
+                                population: (propsObj as any).dan_so ? (propsObj as any).dan_so.toLocaleString() : 'N/A',
+                                population_density: (propsObj as any).matdo_km2 ? `${(propsObj as any).matdo_km2.toLocaleString()} people/km²` : 'N/A',
+                                ward_code: (propsObj as any).ma_xa || 'N/A',
+                                province: (propsObj as any).ten_tinh || 'Đà Nẵng',
+                                address: (propsObj as any).tru_so || 'Not available',
+                                merger_info: (propsObj as any).sap_nhap || 'N/A'
+                            },
+                            position: { x: 0, y: 0 }
+                        };
+                        
+                        setProvinceInfo(info);
+                        
+                        if (onMapClick) {
+                            onMapClick({ latitude: latitude!, longitude: longitude!, altitude: altitude || 0 });
+                        }
+                    }
+                } else {
+                    setProvinceInfo(null);
+                }
+            }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+        }
+
+    }, [isViewerReady, geojsons, viewMode, onMapClick]);
 
     // Close popup when clicking outside
     const handleClosePopup = () => {
@@ -621,20 +699,12 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
                     <div className="text-red-500 mb-4 text-4xl">⚠️</div>
                     <p className="text-red-700 font-medium mb-2">Map Error</p>
                     <p className="text-red-600 text-sm mb-4">{error}</p>
-                    <div className="space-x-3">
-                        <button 
-                            onClick={() => {setError(null); setDisplayMode('point');}}
-                            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-                        >
-                            Try Point Mode
-                        </button>
-                        <button 
-                            onClick={() => window.location.reload()}
-                            className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
-                        >
-                            Reload
-                        </button>
-                    </div>
+                    <button 
+                        onClick={() => window.location.reload()}
+                        className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+                    >
+                        Reload
+                    </button>
                 </div>
             </div>
         );
@@ -653,21 +723,23 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
                 </div>
             )}
 
-            {displayMode === 'point' && !isLoading && (
-                <div className="absolute top-4 left-4 bg-blue-500 text-white px-3 py-1 rounded-md text-sm z-20">
-                    📍 Point View
+            {/* View Mode Indicator */}
+            <div className="absolute top-4 left-4 z-20">
+                <div className="bg-blue-500 text-white px-3 py-1 rounded-md text-sm">
+                    {viewMode === 'TinhThanh' ? '🏛️ Province View' : '🏘️ Ward/Commune View'}
                 </div>
-            )}
+            </div>
 
+            {/* View Mode Selector */}
             <div className="absolute top-4 right-4 z-20">
                 <select 
-                    value={displayMode}
-                    onChange={(e) => setDisplayMode(e.target.value as any)}
+                    value={viewMode}
+                    onChange={(e) => setViewMode(e.target.value as 'TinhThanh' | 'XaPhuong')}
                     className="px-3 py-2 bg-white border border-gray-300 rounded-md text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     disabled={isLoading}
                 >
-                    <option value="polygon">Boundary View</option>
-                    <option value="point">Point View</option>
+                    <option value="TinhThanh">TinhThanh View</option>
+                    <option value="XaPhuong">XaPhuong View</option>
                 </select>
             </div>
 

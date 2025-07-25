@@ -137,77 +137,94 @@ async function main() {
     }
 
     // Create sample models
-    const sampleModels = [
-      {
-        name: 'Electric Pole 22kV',
-        description: 'Standard 22kV electric pole model for urban infrastructure',
-        url: 'uploads/models/sample/La_Queenara.glb',
-        longitude: 106.6297,
-        latitude: 10.8231,
-        height: 0,
-        category: 'electric',
-        tags: ['electric', 'pole', '22kv', 'infrastructure'],
-        userId: admin.id
-      }
-      // ,
-      // {
-      //   name: 'Xa Cu Tree',
-      //   description: 'Traditional Vietnamese Xa Cu tree model',
-      //   url: 'uploads/models/sample/xa_cu_tree.glb',
-      //   longitude: 106.6320,
-      //   latitude: 10.8250,
-      //   height: 0,
-      //   scale: 1.5,
-      //   category: 'trees',
-      //   tags: ['tree', 'xa-cu', 'vegetation', 'vietnamese'],
-      //   userId: demoUser.id
-      // },
-      // {
-      //   name: 'Traffic Light',
-      //   description: '3-way traffic light for intersection management',
-      //   url: 'uploads/models/sample/traffic_light.glb',
-      //   longitude: 106.6280,
-      //   latitude: 10.8200,
-      //   height: 0,
-      //   category: 'traffic',
-      //   tags: ['traffic', 'light', 'intersection', 'control'],
-      //   userId: admin.id
-      // }
-    ];
+    // const sampleModels = [
+    //   {
+    //     name: 'Electric Pole 22kV',
+    //     description: 'Standard 22kV electric pole model for urban infrastructure',
+    //     url: 'uploads/models/sample/La_Queenara.glb',
+    //     longitude: 106.6297,
+    //     latitude: 10.8231,
+    //     height: 0,
+    //     category: 'electric',
+    //     tags: ['electric', 'pole', '22kv', 'infrastructure'],
+    //     userId: admin.id
+    //   }
+    //   // ,
+    //   // {
+    //   //   name: 'Xa Cu Tree',
+    //   //   description: 'Traditional Vietnamese Xa Cu tree model',
+    //   //   url: 'uploads/models/sample/xa_cu_tree.glb',
+    //   //   longitude: 106.6320,
+    //   //   latitude: 10.8250,
+    //   //   height: 0,
+    //   //   scale: 1.5,
+    //   //   category: 'trees',
+    //   //   tags: ['tree', 'xa-cu', 'vegetation', 'vietnamese'],
+    //   //   userId: demoUser.id
+    //   // },
+    //   // {
+    //   //   name: 'Traffic Light',
+    //   //   description: '3-way traffic light for intersection management',
+    //   //   url: 'uploads/models/sample/traffic_light.glb',
+    //   //   longitude: 106.6280,
+    //   //   latitude: 10.8200,
+    //   //   height: 0,
+    //   //   category: 'traffic',
+    //   //   tags: ['traffic', 'light', 'intersection', 'control'],
+    //   //   userId: admin.id
+    //   // }
+    // ];
 
-    for (const modelData of sampleModels) {
-      if (sampleModels.length > 0) {
-        const model = await prisma.model.create({
-          data: modelData
-        });
-        console.log('✅ Sample model created:', model.name);
-      }
-    }
+    // for (const modelData of sampleModels) {
+    //   if (sampleModels.length > 0) {
+    //     const model = await prisma.model.create({
+    //       data: modelData
+    //     });
+    //     console.log('✅ Sample model created:', model.name);
+    //   }
+    // }
 
-    // Đọc dữ liệu từ file Viet_Nam.geojson
+    // Đọc và seed tất cả các file geojson trong geojson_data (bao gồm cả subfolder)
     const fs = require('fs');
     const path = require('path');
-    const geojsonFilePath = path.join(__dirname, '../src/geojson_data/Viet_Nam.geojson');
-    let vietNamGeoJSON = {};
-    try {
-      const geojsonRaw = fs.readFileSync(geojsonFilePath, 'utf8');
-      vietNamGeoJSON = JSON.parse(geojsonRaw);
-      console.log('📄 GeoJSON data loaded from Viet_Nam.geojson');
-    } catch (err) {
-      console.error('❌ Error reading Viet_Nam.geojson:', err);
+    const geojsonRoot = path.join(__dirname, '../src/geojson_data');
+
+    function getAllGeojsonFiles(dir) {
+      let results = [];
+      const list = fs.readdirSync(dir);
+      list.forEach(file => {
+        const filePath = path.join(dir, file);
+        const stat = fs.statSync(filePath);
+        if (stat && stat.isDirectory()) {
+          results = results.concat(getAllGeojsonFiles(filePath));
+        } else if (file.endsWith('.geojson')) {
+          results.push(filePath);
+        }
+      });
+      return results;
     }
 
-    const geoJsonRecord = await prisma.geoJson.create({
-      data: {
-        name: 'Vietnam Boundary',
-        description: 'Administrative boundary of Vietnam',
-        data: vietNamGeoJSON,
-        category: 'administrative',
-        tags: ['boundary', 'country', 'administrative', 'vietnam'],
-        userId: admin.id
+    const geojsonFiles = getAllGeojsonFiles(geojsonRoot);
+    for (const geojsonFilePath of geojsonFiles) {
+      const geojsonFileName = path.basename(geojsonFilePath, '.geojson');
+      try {
+        const geojsonRaw = fs.readFileSync(geojsonFilePath, 'utf8');
+        const geojsonData = JSON.parse(geojsonRaw);
+        const geoJsonRecord = await prisma.geoJson.create({
+          data: {
+            name: geojsonFileName,
+            description: `Administrative boundary of ${geojsonFileName.replace(/_/g, ' ')}`,
+            data: geojsonData,
+            category: 'administrative',
+            tags: ['boundary', 'administrative', 'geojson'],
+            userId: admin.id
+          }
+        });
+        console.log(`✅ GeoJSON created from ${geojsonFileName}.geojson:`, geoJsonRecord.name);
+      } catch (err) {
+        console.error(`❌ Error reading or seeding ${geojsonFileName}.geojson:`, err);
       }
-    });
-    console.log('✅ GeoJSON created from Viet_Nam.geojson:', geoJsonRecord.name);
+    }
 
     // Create system configurations
     const configurations = [
