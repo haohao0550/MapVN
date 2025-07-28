@@ -102,6 +102,94 @@ const getGeoJson = async (req, res) => {
   }
 };
 
+// New endpoint to get available provinces for XaPhuong mode
+const getAvailableProvinces = async (req, res) => {
+  try {
+    // Get GeoJSONs that are not the main Vietnam map (exclude 'Viet_Nam')
+    // These would be the provinces/cities that have ward/commune data
+    const provinces = await prisma.geoJson.findMany({
+      where: {
+        AND: [
+          { name: { not: 'Viet_Nam' } }, // Exclude the main Vietnam map
+          { isPublic: true }, // Only public GeoJSONs
+          // You can add more conditions here based on your data structure
+          // For example, if you have a type field: { type: 'xaphuong' }
+        ]
+      },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        type: true
+      },
+      orderBy: {
+        name: 'asc'
+      }
+    });
+
+    const formattedProvinces = provinces.map(province => ({
+      id: province.id,
+      name: province.name,
+      description: province.description,
+      type: province.type
+    }));
+
+    res.json({
+      success: true,
+      data: formattedProvinces
+    });
+  } catch (error) {
+    console.error('Error fetching available provinces:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get available provinces',
+      error: error.message
+    });
+  }
+};
+
+// Alternative: Get provinces by type (if you have a type field in your schema)
+const getProvincesByType = async (req, res) => {
+  try {
+    const { type = 'xaphuong' } = req.query;
+    
+    const provinces = await prisma.geoJson.findMany({
+      where: {
+        type: type,
+        isPublic: true
+      },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        type: true
+      },
+      orderBy: {
+        name: 'asc'
+      }
+    });
+
+    const formattedProvinces = provinces.map(province => ({
+      id: province.id,
+      name: province.name,
+      description: province.description,
+      type: province.type
+    }));
+
+    res.json({
+      success: true,
+      data: formattedProvinces
+    });
+  } catch (error) {
+    console.error('Error fetching provinces by type:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get provinces by type',
+      error: error.message
+    });
+  }
+};
+
 const createGeoJson = async (req, res) => {
   try {
     const {
@@ -243,5 +331,7 @@ module.exports = {
   getGeoJson,
   createGeoJson,
   updateGeoJson,
-  deleteGeoJson
+  deleteGeoJson,
+  getAvailableProvinces,
+  getProvincesByType
 };
