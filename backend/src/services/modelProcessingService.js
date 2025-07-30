@@ -59,43 +59,57 @@ class ModelProcessingService {
   }
 
   /**
-   * Create transformation matrix for positioning model in world coordinates
-   * @param {Object} position - Position {longitude, latitude, height}
-   * @returns {Array} - 4x4 transformation matrix
+   * Create transformation matrix for positioning model in world coordinates, with scale, heading, pitch, roll
+   * @param {Object} params - {longitude, latitude, height, scale, heading, pitch, roll}
+   * @returns {Array} - 4x4 transformation matrix (column-major)
    */
-  createTransformMatrix(position) {
-    const { longitude, latitude, height } = position;
-    
+  createTransformMatrix(params) {
+    const { longitude, latitude, height, scale = 1, heading = 0, pitch = 0, roll = 0 } = params;
     // Convert degrees to radians
     const lonRad = longitude * Math.PI / 180;
     const latRad = latitude * Math.PI / 180;
-    
+    const headingRad = heading * Math.PI / 180;
+    const pitchRad = pitch * Math.PI / 180;
+    const rollRad = roll * Math.PI / 180;
     // Earth's radius in meters
     const earthRadius = 6378137.0;
-    
     // Calculate Cartesian coordinates
     const cosLat = Math.cos(latRad);
     const sinLat = Math.sin(latRad);
     const cosLon = Math.cos(lonRad);
     const sinLon = Math.sin(lonRad);
-    
     const x = (earthRadius + height) * cosLat * cosLon;
     const y = (earthRadius + height) * cosLat * sinLon;
     const z = (earthRadius + height) * sinLat;
-    
-    // Create transformation matrix (column-major order for Cesium)
+    // Rotation matrices (heading, pitch, roll)
+    // Heading (Z), Pitch (X), Roll (Y) - Tait-Bryan angles
+    const ch = Math.cos(headingRad), sh = Math.sin(headingRad);
+    const cp = Math.cos(pitchRad), sp = Math.sin(pitchRad);
+    const cr = Math.cos(rollRad), sr = Math.sin(rollRad);
+    // Compose rotation: R = Rz(heading) * Rx(pitch) * Ry(roll)
+    // Column-major order for Cesium
+    const m00 = ch * cr + sh * sp * sr;
+    const m01 = sr * cp;
+    const m02 = -sh * cr + ch * sp * sr;
+    const m10 = -ch * sr + sh * sp * cr;
+    const m11 = cr * cp;
+    const m12 = sr * sh + ch * sp * cr;
+    const m20 = sh * cp;
+    const m21 = -sp;
+    const m22 = ch * cp;
+    // Apply scale
     return [
-      1, 0, 0, 0,
-      0, 1, 0, 0,
-      0, 0, 1, 0,
+      m00 * scale, m01 * scale, m02 * scale, 0,
+      m10 * scale, m11 * scale, m12 * scale, 0,
+      m20 * scale, m21 * scale, m22 * scale, 0,
       x, y, z, 1
     ];
   }
 
   /**
-   * Generate tileset.json dynamically for a model
+   * Generate tileset.json dynamically for a model, supporting scale, heading, roll, pitch
    * @param {string} modelId - Model ID
-   * @param {Object} model - Model data from database
+   * @param {Object} model - Model data from database (should include longitude, latitude, height, scale, heading, roll, pitch)
    * @returns {Object} - Tileset configuration
    */
   generateTilesetJson(modelId, model) {
@@ -124,7 +138,11 @@ class ModelProcessingService {
       tileset.root.transform = this.createTransformMatrix({
         longitude: model.longitude,
         latitude: model.latitude,
-        height: model.height
+        height: model.height,
+        scale: model.scale || 1,
+        heading: model.heading || 0,
+        pitch: model.pitch || 0,
+        roll: model.roll || 0
       });
     }
 
