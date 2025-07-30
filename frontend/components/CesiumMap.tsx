@@ -276,6 +276,46 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
         }
     }, []);
 
+    // Function to clean up existing data sources
+    const cleanupDataSources = useCallback(async () => {
+        if (!viewerRef.current || !cesiumRef.current) return;
+        
+        const viewer = viewerRef.current;
+        
+        console.log('Cleaning up existing data sources...');
+        
+        // Remove existing click handler
+        if (clickHandlerRef.current && !clickHandlerRef.current.isDestroyed()) {
+            clickHandlerRef.current.destroy();
+            clickHandlerRef.current = null;
+        }
+        
+        // Remove existing data source
+        if (geoJsonDataSourceRef.current) {
+            try {
+                await viewer.dataSources.remove(geoJsonDataSourceRef.current, true);
+                console.log('Successfully removed data source');
+            } catch (error) {
+                console.warn('Error removing data source:', error);
+            }
+            geoJsonDataSourceRef.current = null;
+        }
+        
+        // Also remove all data sources to be safe
+        try {
+            await viewer.dataSources.removeAll();
+            console.log('Removed all data sources');
+        } catch (error) {
+            console.warn('Error removing all data sources:', error);
+        }
+        
+        // Close any open info panel
+        setProvinceInfo(null);
+        
+        // Small delay to ensure cleanup is complete
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }, []);
+
     // Load available provinces when component mounts
     useEffect(() => {
         const loadAvailableProvinces = async () => {
@@ -404,9 +444,15 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
     }, [cesiumContainerNode]);
 
     // Handle view mode change
-    const handleViewModeChange = (newViewMode: 'TinhThanh' | 'XaPhuong') => {
+    const handleViewModeChange = async (newViewMode: 'TinhThanh' | 'XaPhuong') => {
+        console.log(`Changing view mode from ${viewMode} to ${newViewMode}`);
+        
+        // First cleanup existing data
+        await cleanupDataSources();
+        
         setViewMode(newViewMode);
         setDataLoadedFor(''); // Reset data loaded tracker
+        
         // Reset selected province when switching modes
         if (newViewMode === 'XaPhuong' && availableProvinces.length > 0) {
             setSelectedProvinceId(availableProvinces[0].id);
@@ -415,12 +461,15 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
         }
     };
 
-    // Handle province selection change - NEW FUNCTION
-    const handleProvinceChange = (newProvinceId: string) => {
+    // Handle province selection change - UPDATED FUNCTION
+    const handleProvinceChange = async (newProvinceId: string) => {
         console.log(`Province changed from ${selectedProvinceId} to ${newProvinceId}`);
+        
+        // First cleanup existing data
+        await cleanupDataSources();
+        
         setSelectedProvinceId(newProvinceId);
         setDataLoadedFor(''); // Reset data loaded tracker to force reload
-        setProvinceInfo(null); // Close any open info panel
     };
 
     // Fetch GeoJSON data by ID from API
@@ -670,7 +719,7 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
     }, [onMapClick, availableProvinces, selectedProvinceId]);
 
-    // Load GeoJSON data based on view mode and selected province
+    // Load GeoJSON data based on view mode and selected province - UPDATED
     useEffect(() => {
         if (!isViewerReady || !viewerRef.current || !cesiumRef.current) return;
 
@@ -688,22 +737,7 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
 
         console.log(`Loading data for: ${currentDataKey}`);
 
-        // ALWAYS remove existing data when loading new data
-        if (geoJsonDataSourceRef.current) {
-            console.log('Removing existing data source');
-            viewer.dataSources.remove(geoJsonDataSourceRef.current, true);
-            geoJsonDataSourceRef.current = null;
-        }
-
-        // Remove existing click handler
-        if (clickHandlerRef.current && !clickHandlerRef.current.isDestroyed()) {
-            clickHandlerRef.current.destroy();
-            clickHandlerRef.current = null;
-        }
-
-        // Close existing popup
-        setProvinceInfo(null);
-
+        // Load data based on view mode
         if (viewMode === 'TinhThanh') {
             loadTinhThanhData();
         } else if (viewMode === 'XaPhuong' && selectedProvinceId) {
@@ -720,6 +754,9 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
 
             try {
                 setIsLoading(true);
+
+                // Ensure clean state before loading
+                await cleanupDataSources();
 
                 const processedData = sanitizeGeoJsonRobust(vietnamGeoJson.data);
                 const loadOptions = {
@@ -794,6 +831,9 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
                 setIsLoading(true);
 
                 console.log(`Fetching XaPhuong data for province ID: ${selectedProvinceId}`);
+                
+                // Ensure clean state before loading
+                await cleanupDataSources();
                 
                 // Fetch GeoJSON data from API
                 const geoJsonData = await fetchGeoJsonById(selectedProvinceId);
@@ -886,7 +926,7 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
             }
         }
 
-    }, [isViewerReady, vietnamGeoJson, viewMode, selectedProvinceId, apiBaseUrl, availableProvinces, setupTinhThanhClickHandler, setupXaPhuongClickHandler, fetchGeoJsonById, dataLoadedFor, calculateBounds]);
+    }, [isViewerReady, vietnamGeoJson, viewMode, selectedProvinceId, apiBaseUrl, availableProvinces, setupTinhThanhClickHandler, setupXaPhuongClickHandler, fetchGeoJsonById, dataLoadedFor, calculateBounds, cleanupDataSources]);
 
     // Close popup when clicking outside
     const handleClosePopup = () => {
