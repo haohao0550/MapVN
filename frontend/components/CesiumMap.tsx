@@ -6,16 +6,13 @@ import dynamic from 'next/dynamic';
 interface CesiumMapProps {
     className?: string;
     models?: any[];
-    geojsons?: any[];
     onModelClick?: (model: any) => void;
     onMapClick?: (position: { latitude: number; longitude: number; altitude: number }) => void;
     show3DTiles?: boolean;
     enableProvinceHighlight?: boolean;
     provinceColors?: Record<string, string>;
-    loadVietnamGeoJson?: boolean;
-    // New props for dynamic API integration
+    // API configuration
     apiBaseUrl?: string; // e.g., '/api/geojsons'
-    availableProvinces?: Array<{ id: string; name: string; }>; // List of provinces with their IDs
 }
 
 // Province info interface
@@ -26,6 +23,14 @@ interface ProvinceInfo {
     altitude: number;
     properties: Record<string, any>;
     position: { x: number; y: number };
+}
+
+// Available province interface
+interface AvailableProvince {
+    id: string;
+    name: string;
+    description?: string;
+    category?: string;
 }
 
 // Robust GeoJSON sanitizer
@@ -172,7 +177,7 @@ const ProvinceInfoPanel: React.FC<{
             {!info ? (
                 <div className="text-center text-gray-500 py-8">
                     <div className="text-3xl mb-2">🗺️</div>
-                    <p className="text-sm">Click on a province to view information</p>
+                    <p className="text-sm">Click on a province/ward to view information</p>
                 </div>
             ) : (
                 <>
@@ -243,30 +248,8 @@ const ProvinceInfoPanel: React.FC<{
 const CesiumViewer: React.FC<CesiumMapProps> = ({
     onModelClick,
     onMapClick,
-    geojsons,
-    apiBaseUrl = '/api/geojsons',
-    availableProvinces = []
+    apiBaseUrl = '/api/geojsons'
 }) => {
-    // Auto-generate available provinces from geojsons if not provided
-    const computedAvailableProvinces = React.useMemo(() => {
-        if (availableProvinces.length > 0) {
-            return availableProvinces;
-        }
-        
-        // Extract provinces from geojsons (exclude 'Viet_Nam' as it's for TinhThanh mode)
-        if (Array.isArray(geojsons)) {
-            return geojsons
-                .filter(g => g.name && g.name !== 'Viet_Nam' && (g.data || g.geojson))
-                .map(g => ({
-                    id: String(g.id || g.name), // Ensure ID is always string
-                    name: g.name,
-                    originalItem: g // Keep reference to original item for debugging
-                }));
-        }
-        
-        return [];
-    }, [geojsons, availableProvinces]);
-
     const viewerRef = useRef<any>(null);
     const cesiumRef = useRef<any>(null);
     const geoJsonDataSourceRef = useRef<any>(null);
@@ -279,6 +262,8 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
     const [selectedProvinceId, setSelectedProvinceId] = useState<string>('');
     const [provinceInfo, setProvinceInfo] = useState<ProvinceInfo | null>(null);
     const [loadingXaPhuong, setLoadingXaPhuong] = useState<boolean>(false);
+    const [availableProvinces, setAvailableProvinces] = useState<AvailableProvince[]>([]);
+    const [vietnamGeoJson, setVietnamGeoJson] = useState<any>(null);
     
     // Track if data has been loaded to prevent re-loading
     const [dataLoadedFor, setDataLoadedFor] = useState<string>('');
@@ -290,6 +275,53 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
             setCesiumContainerNode(node);
         }
     }, []);
+
+    // Load available provinces when component mounts
+    useEffect(() => {
+        const loadAvailableProvinces = async () => {
+            try {
+                const response = await fetch(`${apiBaseUrl}/provinces`);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch provinces: ${response.statusText}`);
+                }
+                const data = await response.json();
+                if (data.success && Array.isArray(data.data)) {
+                    setAvailableProvinces(data.data);
+                    // Set first province as default for XaPhuong mode
+                    if (data.data.length > 0) {
+                        setSelectedProvinceId(data.data[0].id);
+                    }
+                }
+            } catch (err) {
+                console.error('Error loading available provinces:', err);
+                // Don't set error here as it's not critical for initial load
+            }
+        };
+
+        loadAvailableProvinces();
+    }, [apiBaseUrl]);
+
+    // Load Vietnam GeoJSON when component mounts
+    useEffect(() => {
+        const loadVietnamGeoJson = async () => {
+            try {
+                const response = await fetch(`${apiBaseUrl}/vietnam`);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch Vietnam GeoJSON: ${response.statusText}`);
+                }
+                const data = await response.json();
+                if (data.success && data.data) {
+                    setVietnamGeoJson(data.data);
+                    console.log('Vietnam GeoJSON loaded:', data.data);
+                }
+            } catch (err) {
+                console.error('Error loading Vietnam GeoJSON:', err);
+                setError(`Failed to load Vietnam map data: ${err instanceof Error ? err.message : 'Unknown error'}`);
+            }
+        };
+
+        loadVietnamGeoJson();
+    }, [apiBaseUrl]);
 
     // Initialize Cesium
     useEffect(() => {
@@ -376,55 +408,25 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
         setViewMode(newViewMode);
         setDataLoadedFor(''); // Reset data loaded tracker
         // Reset selected province when switching modes
-        if (newViewMode === 'XaPhuong' && computedAvailableProvinces.length > 0) {
-            setSelectedProvinceId(computedAvailableProvinces[0].id);
+        if (newViewMode === 'XaPhuong' && availableProvinces.length > 0) {
+            setSelectedProvinceId(availableProvinces[0].id);
         } else {
             setSelectedProvinceId('');
         }
     };
 
-    // Fetch GeoJSON data by ID from API or from local geojsons
+    // Handle province selection change - NEW FUNCTION
+    const handleProvinceChange = (newProvinceId: string) => {
+        console.log(`Province changed from ${selectedProvinceId} to ${newProvinceId}`);
+        setSelectedProvinceId(newProvinceId);
+        setDataLoadedFor(''); // Reset data loaded tracker to force reload
+        setProvinceInfo(null); // Close any open info panel
+    };
+
+    // Fetch GeoJSON data by ID from API
     const fetchGeoJsonById = async (id: string) => {
         try {
-            console.log(`Looking for GeoJSON with ID: ${id}`);
-            console.log('Available geojsons:', geojsons?.map(g => ({ 
-                id: g.id, 
-                name: g.name, 
-                hasData: !!(g.data || g.geojson),
-                keys: Object.keys(g)
-            })));
-            
-            // First check if data is already in geojsons array
-            // Try to match by ID first, then by name, then by string/number conversion
-            const localGeoJson = Array.isArray(geojsons) ? 
-                geojsons.find(g => {
-                    // Direct ID match
-                    if (g.id === id) return true;
-                    // String/number ID match  
-                    if (String(g.id) === String(id)) return true;
-                    // Name match (fallback)
-                    if (g.name === id) return true;
-                    return false;
-                }) : null;
-                
-            if (localGeoJson) {
-                // Try different possible data field names
-                const geoJsonData = localGeoJson.data || localGeoJson.geojson || localGeoJson.geometry;
-                
-                if (geoJsonData) {
-                    console.log(`Using local GeoJSON data for ${id}:`, geoJsonData);
-                    return {
-                        ...localGeoJson,
-                        data: geoJsonData
-                    };
-                } else {
-                    console.log(`Local item found for ${id} but no valid data field:`, Object.keys(localGeoJson));
-                }
-            }
-            
-            console.log(`No local data found for ID: ${id}, fetching from API...`);
-            
-            // If not found locally, fetch from API
+            console.log(`Fetching GeoJSON with ID: ${id}`);
             const response = await fetch(`${apiBaseUrl}/${id}`);
             if (!response.ok) {
                 throw new Error(`Failed to fetch GeoJSON: ${response.statusText} (${response.status})`);
@@ -436,6 +438,47 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
             console.error(`Error fetching GeoJSON for ID ${id}:`, error);
             throw error;
         }
+    };
+
+    // Function to calculate bounds from GeoJSON data
+    const calculateBounds = (geoJsonData: any) => {
+        if (!geoJsonData || !geoJsonData.features || geoJsonData.features.length === 0) {
+            return null;
+        }
+
+        let minLon = Infinity, maxLon = -Infinity;
+        let minLat = Infinity, maxLat = -Infinity;
+
+        const processCoordinates = (coords: any[]) => {
+            if (typeof coords[0] === 'number') {
+                // Single coordinate pair
+                const [lon, lat] = coords;
+                minLon = Math.min(minLon, lon);
+                maxLon = Math.max(maxLon, lon);
+                minLat = Math.min(minLat, lat);
+                maxLat = Math.max(maxLat, lat);
+            } else {
+                // Array of coordinates
+                coords.forEach(processCoordinates);
+            }
+        };
+
+        geoJsonData.features.forEach((feature: any) => {
+            if (feature.geometry && feature.geometry.coordinates) {
+                processCoordinates(feature.geometry.coordinates);
+            }
+        });
+
+        if (minLon === Infinity) return null;
+
+        // Add some padding
+        const padding = 0.1;
+        return {
+            west: minLon - padding,
+            south: minLat - padding,
+            east: maxLon + padding,
+            north: maxLat + padding
+        };
     };
 
     // Memoize click handlers to prevent recreating them
@@ -482,7 +525,7 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
                 console.log("TinhThanh Properties: ", propsObj);
                 
                 // Get province name
-                let provinceName = propsObj.ten_tinh || 'Unknown Province';
+                let provinceName = propsObj.ten_tinh || propsObj.NAME || propsObj.name || 'Unknown Province';
                 
                 // Get coordinates from polygon geometry
                 let latitude: number, longitude: number, altitude = 0;
@@ -570,7 +613,7 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
                 console.log("XaPhuong Properties: ", propsObj);
                 
                 // Get ward/commune name
-                let wardName = (propsObj as any).ten_xa || (propsObj as any).name || (propsObj as any).NAME || 'Unknown Ward/Commune';
+                let wardName = propsObj.ten_xa || propsObj.name || propsObj.NAME || 'Unknown Ward/Commune';
                 
                 // Get coordinates from polygon geometry
                 let latitude: number, longitude: number, altitude = 0;
@@ -594,23 +637,23 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
                 
                 // Create info object for ward/commune
                 if (typeof latitude! === 'number' && typeof longitude! === 'number') {
-                    const selectedProvinceName = computedAvailableProvinces.find(p => p.id === selectedProvinceId)?.name || 'Unknown Province';
+                    const selectedProvinceName = availableProvinces.find(p => p.id === selectedProvinceId)?.name || 'Unknown Province';
                     
                     const info: ProvinceInfo = {
-                        name: `${wardName} (${(propsObj as any).loai || 'Ward/Commune'})`,
+                        name: `${wardName} (${propsObj.loai || 'Ward/Commune'})`,
                         latitude: latitude!,
                         longitude: longitude!,
                         altitude: altitude || 0,
                         properties: {
                             ...propsObj,
-                            type: (propsObj as any).loai || 'Ward/Commune',
-                            area_km2: (propsObj as any).dtich_km2 ? `${(propsObj as any).dtich_km2} km²` : 'N/A',
-                            population: (propsObj as any).dan_so ? (propsObj as any).dan_so.toLocaleString() : 'N/A',
-                            population_density: (propsObj as any).matdo_km2 ? `${(propsObj as any).matdo_km2.toLocaleString()} people/km²` : 'N/A',
-                            ward_code: (propsObj as any).ma_xa || 'N/A',
-                            province: (propsObj as any).ten_tinh || selectedProvinceName,
-                            address: (propsObj as any).tru_so || 'Not available',
-                            merger_info: (propsObj as any).sap_nhap || 'N/A'
+                            type: propsObj.loai || 'Ward/Commune',
+                            area_km2: propsObj.dtich_km2 ? `${propsObj.dtich_km2} km²` : 'N/A',
+                            population: propsObj.dan_so ? propsObj.dan_so.toLocaleString() : 'N/A',
+                            population_density: propsObj.matdo_km2 ? `${propsObj.matdo_km2.toLocaleString()} people/km²` : 'N/A',
+                            ward_code: propsObj.ma_xa || 'N/A',
+                            province: propsObj.ten_tinh || selectedProvinceName,
+                            address: propsObj.tru_so || 'Not available',
+                            merger_info: propsObj.sap_nhap || 'N/A'
                         },
                         position: { x: 0, y: 0 }
                     };
@@ -625,7 +668,7 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
                 setProvinceInfo(null);
             }
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
-    }, [onMapClick, computedAvailableProvinces, selectedProvinceId]);
+    }, [onMapClick, availableProvinces, selectedProvinceId]);
 
     // Load GeoJSON data based on view mode and selected province
     useEffect(() => {
@@ -643,8 +686,11 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
             return;
         }
 
-        // Remove existing data
+        console.log(`Loading data for: ${currentDataKey}`);
+
+        // ALWAYS remove existing data when loading new data
         if (geoJsonDataSourceRef.current) {
+            console.log('Removing existing data source');
             viewer.dataSources.remove(geoJsonDataSourceRef.current, true);
             geoJsonDataSourceRef.current = null;
         }
@@ -665,16 +711,17 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
         }
 
         async function loadTinhThanhData() {
-            const ttGeo = Array.isArray(geojsons) ? geojsons.find(g => g.name === 'Viet_Nam') : null;
-            
-            if (!ttGeo || !ttGeo.data) return;
+            if (!vietnamGeoJson || !vietnamGeoJson.data) {
+                console.log('Vietnam GeoJSON not available yet');
+                return;
+            }
 
-            console.log('TinhThanh GeoJSON data: ', ttGeo.data);
+            console.log('Loading TinhThanh GeoJSON data:', vietnamGeoJson.data);
 
             try {
                 setIsLoading(true);
 
-                const processedData = sanitizeGeoJsonRobust(ttGeo.data);
+                const processedData = sanitizeGeoJsonRobust(vietnamGeoJson.data);
                 const loadOptions = {
                     stroke: Cesium.Color.YELLOW,
                     fill: Cesium.Color.YELLOW.withAlpha(0.15),
@@ -804,16 +851,21 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
                     // Set up click handler AFTER data is loaded
                     setupXaPhuongClickHandler();
                     
-                    // Focus camera on the selected province
-                    const selectedProvince = computedAvailableProvinces.find(p => p.id === selectedProvinceId);
-                    if (selectedProvince) {
-                        // Get bounds from the loaded data to center camera appropriately
-                        const rectangle = dataSource.entities.computeScreenSpacePosition ? 
-                            Cesium.Rectangle.fromDegrees(102, 8, 110, 24) : // Fallback bounds
-                            Cesium.Rectangle.fromDegrees(102, 8, 110, 24);
+                    // Calculate bounds and flyTo the province
+                    const bounds = calculateBounds(processedData);
+                    if (bounds) {
+                        const rectangle = Cesium.Rectangle.fromDegrees(
+                            bounds.west, bounds.south, bounds.east, bounds.north
+                        );
                         
                         viewer.camera.flyTo({
                             destination: viewer.camera.getRectangleCameraCoordinates(rectangle),
+                            duration: 2.0
+                        });
+                    } else {
+                        // Fallback: use Vietnam bounds
+                        viewer.camera.flyTo({
+                            destination: Cesium.Cartesian3.fromDegrees(105.8, 15.9, 800000),
                             duration: 2.0
                         });
                     }
@@ -834,7 +886,7 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
             }
         }
 
-    }, [isViewerReady, geojsons, viewMode, selectedProvinceId, apiBaseUrl, computedAvailableProvinces, setupTinhThanhClickHandler, setupXaPhuongClickHandler, fetchGeoJsonById, dataLoadedFor]);
+    }, [isViewerReady, vietnamGeoJson, viewMode, selectedProvinceId, apiBaseUrl, availableProvinces, setupTinhThanhClickHandler, setupXaPhuongClickHandler, fetchGeoJsonById, dataLoadedFor, calculateBounds]);
 
     // Close popup when clicking outside
     const handleClosePopup = () => {
@@ -878,7 +930,7 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
             <div className="absolute top-4 left-4 z-20">
                 <div className="bg-blue-500 text-white px-3 py-1 rounded-md text-sm">
                     {viewMode === 'TinhThanh' ? '🏛️ Province View' : 
-                     `🏘️ ${computedAvailableProvinces.find(p => p.id === selectedProvinceId)?.name || 'Ward/Commune'} View`}
+                     `🏘️ ${availableProvinces.find(p => p.id === selectedProvinceId)?.name || 'Ward/Commune'} View`}
                 </div>
             </div>
 
@@ -895,14 +947,14 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
                 </select>
                 
                 {/* Province Selector - Only visible when XaPhuong mode is selected */}
-                {viewMode === 'XaPhuong' && computedAvailableProvinces.length > 0 && (
+                {viewMode === 'XaPhuong' && availableProvinces.length > 0 && (
                     <select 
                         value={selectedProvinceId}
-                        onChange={(e) => setSelectedProvinceId(e.target.value)}
+                        onChange={(e) => handleProvinceChange(e.target.value)}
                         className="w-full px-3 py-2 bg-white border border-gray-300 rounded-md text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                         disabled={isLoading || loadingXaPhuong}
                     >
-                        {computedAvailableProvinces.map((province) => (
+                        {availableProvinces.map((province) => (
                             <option key={province.id} value={province.id}>
                                 {province.name}
                             </option>
@@ -911,7 +963,7 @@ const CesiumViewer: React.FC<CesiumMapProps> = ({
                 )}
                 
                 {/* Show message if no provinces available for XaPhuong mode */}
-                {viewMode === 'XaPhuong' && computedAvailableProvinces.length === 0 && (
+                {viewMode === 'XaPhuong' && availableProvinces.length === 0 && (
                     <div className="w-full px-3 py-2 bg-yellow-100 border border-yellow-300 rounded-md text-sm text-yellow-800">
                         No provinces available
                     </div>
@@ -947,32 +999,9 @@ const CesiumComponent = dynamic(
 const CesiumMap: React.FC<CesiumMapProps> = ({ className = '', ...props }) => {
     const [isClient, setIsClient] = useState(false);
 
-    // Log geojson names on mount if available
     useEffect(() => {
         setIsClient(true);
-        if (props.geojsons && Array.isArray(props.geojsons)) {
-            const names = props.geojsons.map(g => g.name || '[no name]');
-            // console.log('GeoJSONs received from backend:', names);
-            // console.log('Full GeoJSONs structure:', props.geojsons.map(g => ({
-            //     id: g.id,
-            //     name: g.name,
-            //     hasData: !!g.data,
-            //     dataType: typeof g.data
-            // })));
-        } else {
-            console.log('No geojsons received from backend.');
-        }
-        
-        if (props.availableProvinces && Array.isArray(props.availableProvinces)) {
-            console.log('Available provinces:', props.availableProvinces);
-        } else if (props.geojsons && Array.isArray(props.geojsons)) {
-            // Log auto-computed provinces
-            const autoProvinces = props.geojsons
-                .filter(g => g.name && g.name !== 'Viet_Nam')
-                .map(g => ({ id: g.id || g.name, name: g.name }));
-            console.log('Auto-computed available provinces:', autoProvinces);
-        }
-    }, [props.geojsons, props.availableProvinces]);
+    }, []);
 
     if (!isClient) {
         return (

@@ -1,14 +1,26 @@
 const express = require('express');
-const { 
-  getGeoJsons, 
-  getGeoJson, 
-  createGeoJson, 
-  updateGeoJson, 
-  deleteGeoJson 
+const {
+    getGeoJsons,
+    getGeoJson,
+    createGeoJson,
+    updateGeoJson,
+    deleteGeoJson,
+    getAvailableProvinces,
+    getProvincesByType
 } = require('../controllers/geojsonController');
 const { auth } = require('../middleware/auth');
 
 const router = express.Router();
+
+// @route   GET /api/geojsons/provinces
+// @desc    Get available provinces for XaPhuong mode
+// @access  Public
+router.get('/provinces', getAvailableProvinces);
+
+// @route   GET /api/geojsons/provinces/by-type
+// @desc    Get provinces by type (alternative endpoint)
+// @access  Public
+router.get('/provinces/by-type', getProvincesByType);
 
 // @route   GET /api/geojsons
 // @desc    Get all GeoJSONs

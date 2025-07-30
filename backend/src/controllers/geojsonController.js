@@ -13,6 +13,140 @@ const testConnection = async () => {
 
 testConnection();
 
+// Get Vietnam GeoJSON data only (id=1) for initial page load
+const getVietnamGeoJson = async (req, res) => {
+  try {
+    const vietnamGeoJson = await prisma.geoJson.findUnique({
+      where: { id: 1 }, // Vietnam data is always ID 1
+      include: {
+        user: {
+          select: { id: true, username: true, email: true }
+        },
+        categoryRel: {
+          select: { id: true, name: true, color: true, icon: true }
+        }
+      }
+    });
+
+    if (!vietnamGeoJson) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vietnam GeoJSON not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: vietnamGeoJson
+    });
+  } catch (error) {
+    console.error('Error fetching Vietnam GeoJSON:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get Vietnam GeoJSON',
+      error: error.message
+    });
+  }
+};
+
+// Get list of available provinces for XaPhuong dropdown (without heavy GeoJSON data)
+const getAvailableProvinces = async (req, res) => {
+  try {
+    // Get provinces/cities that have ward/commune data (exclude Vietnam map id=1)
+    const provinces = await prisma.geoJson.findMany({
+      where: {
+        AND: [
+          { id: { not: 1 } }, // Exclude Vietnam map
+          { isPublic: true }, // Only public GeoJSONs
+        ]
+      },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        category: true
+      },
+      orderBy: {
+        name: 'asc'
+      }
+    });
+
+    const formattedProvinces = provinces.map(province => ({
+      id: province.id.toString(), // Ensure ID is string for frontend consistency
+      name: province.name,
+      description: province.description,
+      category: province.category
+    }));
+
+    res.json({
+      success: true,
+      data: formattedProvinces
+    });
+  } catch (error) {
+    console.error('Error fetching available provinces:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get available provinces',
+      error: error.message
+    });
+  }
+};
+
+// Get GeoJSON by ID (for XaPhuong data when province is selected)
+const getGeoJson = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const numericId = parseInt(id, 10);
+
+    if (isNaN(numericId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid ID format'
+      });
+    }
+
+    const geojson = await prisma.geoJson.findUnique({
+      where: { id: numericId },
+      include: {
+        user: {
+          select: { id: true, username: true, email: true }
+        },
+        categoryRel: {
+          select: { id: true, name: true, color: true, icon: true }
+        }
+      }
+    });
+
+    if (!geojson) {
+      return res.status(404).json({
+        success: false,
+        message: 'GeoJSON not found'
+      });
+    }
+
+    // Only return public GeoJSONs for non-authenticated requests
+    if (!geojson.isPublic && (!req.user || req.user.id !== geojson.userId)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied to private GeoJSON'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: geojson
+    });
+  } catch (error) {
+    console.error('Error fetching GeoJSON:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get GeoJSON',
+      error: error.message
+    });
+  }
+};
+
+// Get all GeoJSONs with pagination (for admin or data management purposes)
 const getGeoJsons = async (req, res) => {
   try {
     const { page = 1, limit = 10, type, search } = req.query;
@@ -24,7 +158,8 @@ const getGeoJsons = async (req, res) => {
           { name: { contains: search, mode: 'insensitive' } },
           { description: { contains: search, mode: 'insensitive' } }
         ]
-      })
+      }),
+      ...(type && { category: type })
     };
 
     const [geojsons, total] = await Promise.all([
@@ -58,133 +193,10 @@ const getGeoJsons = async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('Error fetching GeoJSONs:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to get GeoJSONs',
-      error: error.message
-    });
-  }
-};
-
-const getGeoJson = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const geojson = await prisma.geoJson.findUnique({
-      where: { id },
-      include: {
-        user: {
-          select: { id: true, name: true, email: true }
-        },
-        categoryRel: {
-          select: { id: true, name: true, color: true, icon: true }
-        }
-      }
-    });
-
-    if (!geojson) {
-      return res.status(404).json({
-        success: false,
-        message: 'GeoJSON not found'
-      });
-    }
-
-    res.json({
-      success: true,
-      data: geojson
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get GeoJSON',
-      error: error.message
-    });
-  }
-};
-
-// New endpoint to get available provinces for XaPhuong mode
-const getAvailableProvinces = async (req, res) => {
-  try {
-    // Get GeoJSONs that are not the main Vietnam map (exclude 'Viet_Nam')
-    // These would be the provinces/cities that have ward/commune data
-    const provinces = await prisma.geoJson.findMany({
-      where: {
-        AND: [
-          { name: { not: 'Viet_Nam' } }, // Exclude the main Vietnam map
-          { isPublic: true }, // Only public GeoJSONs
-          // You can add more conditions here based on your data structure
-          // For example, if you have a type field: { type: 'xaphuong' }
-        ]
-      },
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        type: true
-      },
-      orderBy: {
-        name: 'asc'
-      }
-    });
-
-    const formattedProvinces = provinces.map(province => ({
-      id: province.id,
-      name: province.name,
-      description: province.description,
-      type: province.type
-    }));
-
-    res.json({
-      success: true,
-      data: formattedProvinces
-    });
-  } catch (error) {
-    console.error('Error fetching available provinces:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get available provinces',
-      error: error.message
-    });
-  }
-};
-
-// Alternative: Get provinces by type (if you have a type field in your schema)
-const getProvincesByType = async (req, res) => {
-  try {
-    const { type = 'xaphuong' } = req.query;
-    
-    const provinces = await prisma.geoJson.findMany({
-      where: {
-        type: type,
-        isPublic: true
-      },
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        type: true
-      },
-      orderBy: {
-        name: 'asc'
-      }
-    });
-
-    const formattedProvinces = provinces.map(province => ({
-      id: province.id,
-      name: province.name,
-      description: province.description,
-      type: province.type
-    }));
-
-    res.json({
-      success: true,
-      data: formattedProvinces
-    });
-  } catch (error) {
-    console.error('Error fetching provinces by type:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get provinces by type',
       error: error.message
     });
   }
@@ -195,8 +207,9 @@ const createGeoJson = async (req, res) => {
     const {
       name,
       description,
-      type,
+      category,
       data,
+      tags = [],
       categoryId,
       isPublic = true
     } = req.body;
@@ -205,15 +218,16 @@ const createGeoJson = async (req, res) => {
       data: {
         name,
         description,
-        type,
+        category,
         data,
+        tags,
         categoryId,
         isPublic: Boolean(isPublic),
         userId: req.user.id
       },
       include: {
         user: {
-          select: { id: true, name: true, email: true }
+          select: { id: true, username: true, email: true }
         },
         categoryRel: {
           select: { id: true, name: true, color: true, icon: true }
@@ -227,6 +241,7 @@ const createGeoJson = async (req, res) => {
       data: geojson
     });
   } catch (error) {
+    console.error('Error creating GeoJSON:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to create GeoJSON',
@@ -238,11 +253,19 @@ const createGeoJson = async (req, res) => {
 const updateGeoJson = async (req, res) => {
   try {
     const { id } = req.params;
+    const numericId = parseInt(id, 10);
     const updateData = req.body;
+
+    if (isNaN(numericId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid ID format'
+      });
+    }
 
     // Check if geojson exists and user owns it (or is admin)
     const existingGeoJson = await prisma.geoJson.findUnique({
-      where: { id }
+      where: { id: numericId }
     });
 
     if (!existingGeoJson) {
@@ -260,11 +283,11 @@ const updateGeoJson = async (req, res) => {
     }
 
     const geojson = await prisma.geoJson.update({
-      where: { id },
+      where: { id: numericId },
       data: updateData,
       include: {
         user: {
-          select: { id: true, name: true, email: true }
+          select: { id: true, username: true, email: true }
         },
         categoryRel: {
           select: { id: true, name: true, color: true, icon: true }
@@ -278,6 +301,7 @@ const updateGeoJson = async (req, res) => {
       data: geojson
     });
   } catch (error) {
+    console.error('Error updating GeoJSON:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to update GeoJSON',
@@ -289,10 +313,18 @@ const updateGeoJson = async (req, res) => {
 const deleteGeoJson = async (req, res) => {
   try {
     const { id } = req.params;
+    const numericId = parseInt(id, 10);
+
+    if (isNaN(numericId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid ID format'
+      });
+    }
 
     // Check if geojson exists and user owns it (or is admin)
     const existingGeoJson = await prisma.geoJson.findUnique({
-      where: { id }
+      where: { id: numericId }
     });
 
     if (!existingGeoJson) {
@@ -310,7 +342,7 @@ const deleteGeoJson = async (req, res) => {
     }
 
     await prisma.geoJson.delete({
-      where: { id }
+      where: { id: numericId }
     });
 
     res.json({
@@ -318,6 +350,7 @@ const deleteGeoJson = async (req, res) => {
       message: 'GeoJSON deleted successfully'
     });
   } catch (error) {
+    console.error('Error deleting GeoJSON:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to delete GeoJSON',
@@ -327,11 +360,11 @@ const deleteGeoJson = async (req, res) => {
 };
 
 module.exports = {
-  getGeoJsons,
-  getGeoJson,
+  getVietnamGeoJson,      // Get only Vietnam data for initial load
+  getAvailableProvinces,  // Get province metadata without heavy GeoJSON data
+  getGeoJson,            // Get specific GeoJSON by ID (for XaPhuong data)
+  getGeoJsons,           // For admin/management purposes
   createGeoJson,
   updateGeoJson,
-  deleteGeoJson,
-  getAvailableProvinces,
-  getProvincesByType
+  deleteGeoJson
 };
